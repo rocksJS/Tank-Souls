@@ -1,5 +1,5 @@
 {
-  "name": "React Battle City",
+  "name": "Tank Souls",
   "description": "A classic NES Battle City (Tank 1990) clone built with React, TypeScript, and Canvas.",
   "requestFramePermissions": []
 }

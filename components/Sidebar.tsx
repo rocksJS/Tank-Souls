@@ -55,7 +55,7 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameSta
 
       {/* Score */}
       <div className="mt-4 border-t-2 border-[#444] w-full pt-4 text-center">
-          <div className="text-gray-500 text-[10px] mb-2 tracking-widest uppercase">Soul Memory</div>
+          <div className="text-gray-500 text-[10px] mb-2 tracking-widest uppercase">SOULS</div>
           <div className="text-yellow-600 font-bold bg-black border border-[#333] px-2 py-1 rounded mb-4">{score}</div>
           
           <button 

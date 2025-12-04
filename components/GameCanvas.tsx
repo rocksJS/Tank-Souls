@@ -90,6 +90,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const bossDashTimerRef = useRef<number>(0);
   const bossDashVectorRef = useRef<{x: number, y: number}>({x: 0, y: 0});
   
+  // Intro / Fog Refs
+  const hasBossCraterRef = useRef<boolean>(false);
+  
   // Use a ref to track current charges inside the game loop to avoid stale closures,
   // but we also need to update the parent state.
   const estusChargesRef = useRef<number>(estusCharges);
@@ -111,8 +114,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Initialize Tile HP Grid
     const newTileHp = Array(GRID_HEIGHT).fill(0).map(() => Array(GRID_WIDTH).fill(0));
 
-    // Explicitly set base and walls ONLY for Level 1 (or make sure they exist in map data for Level 2)
-    if (level === 1) {
+    // Explicitly set base and walls ONLY for Standard Levels (1 and 3)
+    if (level === 1 || level === 3) {
         const centerX = Math.floor(GRID_WIDTH / 2);
         const gridY = GRID_HEIGHT - 1;
         newMap[gridY][centerX] = TileType.BASE;
@@ -169,12 +172,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     bossSpecialTimerRef.current = 0;
     bossDashTimerRef.current = 0;
     bossDashVectorRef.current = {x: 0, y: 0};
+    hasBossCraterRef.current = false;
 
-    // Spawn Boss Immediately for Level 2
+    // Spawn Boss Immediately for Level 2 (But Hidden initially)
     if (level === 2) {
          enemiesRef.current.push({
             x: (GRID_WIDTH / 2) * TILE_SIZE - BOSS_SIZE / 2,
-            y: TILE_SIZE, // Start near top
+            y: TILE_SIZE * 2, // Target landing spot
             width: BOSS_SIZE,
             height: BOSS_SIZE,
             direction: Direction.DOWN,
@@ -185,6 +189,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             isDead: false,
             hp: BOSS_HP,
             maxHp: BOSS_HP,
+            introState: 'HIDDEN',
+            introOffsetY: -300, // Start way above screen
+            introTimer: 0,
+            defenseBuffTimer: 0,
         });
         bossSpawnedRef.current = true;
     } else {
@@ -223,13 +231,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     y: player.y, 
                     id: Math.random().toString(), 
                     stage: 20, // Reuse stage for duration
-                    active: true 
-                    // We'll hijack the explosion drawing to check for special ID or just draw differently based on context
+                    active: true,
+                    type: 'heal'
                  });
-                 // Hack: We can add a property to explosion type, but to minimize file changes, 
-                 // we will assume stage > 10 is a heal effect for now in the draw loop, 
-                 // or we can just use the standard explosion array with a property we add dynamically
-                 (explosionsRef.current[explosionsRef.current.length-1] as any).type = 'heal';
              }
          }
       }
@@ -283,6 +287,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       for (let x = startX; x <= endX; x++) {
         if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
           const tile = mapRef.current[y][x];
+          // Fog does not collide
           if (
               tile === TileType.BRICK || 
               tile === TileType.BRICK_DAMAGED || 
@@ -336,6 +341,52 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return { hit: false, tileX: -1, tileY: -1 };
   }
 
+  // Check and clear fog on player overlap
+  const checkFogOverlap = (player: Tank) => {
+    const startX = Math.floor(player.x / TILE_SIZE);
+    const endX = Math.floor((player.x + player.width - 0.1) / TILE_SIZE);
+    const startY = Math.floor(player.y / TILE_SIZE);
+    const endY = Math.floor((player.y + player.height - 0.1) / TILE_SIZE);
+
+    let hitFog = false;
+
+    // First Check: Did we hit any fog tile?
+    for (let y = startY; y <= endY; y++) {
+      for (let x = startX; x <= endX; x++) {
+          if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
+              if (mapRef.current[y][x] === TileType.FOG) {
+                  hitFog = true;
+                  break;
+              }
+          }
+      }
+      if (hitFog) break;
+    }
+
+    // If we hit fog, clear ALL fog tiles on the map
+    if (hitFog) {
+        for (let y = 0; y < GRID_HEIGHT; y++) {
+            for (let x = 0; x < GRID_WIDTH; x++) {
+                if (mapRef.current[y][x] === TileType.FOG) {
+                    mapRef.current[y][x] = TileType.EMPTY;
+                    // Spawn smoke puff for effect on every cleared tile
+                    // To prevent lag, maybe only spawn a few or randomize
+                    if (Math.random() > 0.7) { 
+                        explosionsRef.current.push({
+                            x: x * TILE_SIZE + TILE_SIZE/2,
+                            y: y * TILE_SIZE + TILE_SIZE/2,
+                            id: Math.random().toString(),
+                            stage: 15,
+                            active: true,
+                            type: 'smoke'
+                        });
+                    }
+                }
+            }
+        }
+    }
+  };
+
   // Update Loop
   const update = useCallback(() => {
     if (gameState !== GameState.PLAYING) return;
@@ -377,6 +428,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             if (!checkMapCollision({ ...player, x: nextX, y: nextY })) {
                 player.x = nextX;
                 player.y = nextY;
+                
+                // Check Fog Interaction
+                checkFogOverlap(player);
             }
         }
 
@@ -400,7 +454,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     }
 
     // --- Enemy Spawning (Standard Levels) ---
-    if (level === 1) {
+    if (level === 1 || level === 3) {
         enemySpawnTimerRef.current++;
         if (enemySpawnTimerRef.current > 180 && enemiesRef.current.length < 4 && enemiesToSpawnRef.current > 0) {
             enemySpawnTimerRef.current = 0;
@@ -433,6 +487,88 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     enemiesRef.current.forEach(enemy => {
         // Boss Logic
         if (enemy.type === 'boss') {
+            
+            // Manage Defense Buff Timer
+            if (enemy.defenseBuffTimer && enemy.defenseBuffTimer > 0) {
+                enemy.defenseBuffTimer--;
+            }
+
+            // --- BOSS COLLISION WITH PLAYER MECHANIC ---
+            if (!player.isDead && enemy.introState === 'FIGHT') {
+                if (checkRectCollision(enemy, player)) {
+                    // Trigger Defense Buff
+                    enemy.defenseBuffTimer = 600; // 10 seconds (60fps)
+                    // Optional: Push/bounce logic could go here, but collision just overlaps for now
+                }
+            }
+
+            // --- CINEMATIC LOGIC ---
+            if (level === 2 && enemy.introState !== 'FIGHT') {
+                const triggerLine = CANVAS_HEIGHT - (6 * TILE_SIZE);
+                
+                if (enemy.introState === 'HIDDEN') {
+                    if (player.y < triggerLine) {
+                        enemy.introState = 'FALLING';
+                    }
+                    return; // Skip rest of logic
+                }
+                
+                if (enemy.introState === 'FALLING') {
+                    // Animate falling
+                    if (enemy.introOffsetY !== undefined) {
+                        enemy.introOffsetY += 10; // Fall speed
+                        if (enemy.introOffsetY >= 0) {
+                            enemy.introOffsetY = 0;
+                            enemy.introState = 'LANDING';
+                            
+                            // IMPACT
+                            hasBossCraterRef.current = true; // Draw crater
+                            explosionsRef.current.push({ 
+                                x: enemy.x + enemy.width/2, 
+                                y: enemy.y + enemy.height/2, 
+                                id: Math.random().toString(), 
+                                stage: 15, 
+                                active: true,
+                                type: 'impact' // Big explosion
+                            });
+                        }
+                    }
+                    return;
+                }
+
+                if (enemy.introState === 'LANDING') {
+                    // Small delay before IDLE
+                    enemy.introState = 'IDLE';
+                    enemy.introTimer = 240; // 4 seconds * 60 fps
+                    return;
+                }
+
+                if (enemy.introState === 'IDLE') {
+                    if (enemy.introTimer && enemy.introTimer > 0) {
+                        enemy.introTimer--;
+                        // Smoke from tracks every few frames
+                        if (enemy.introTimer % 10 === 0) {
+                            explosionsRef.current.push({ 
+                                x: enemy.x + Math.random() * enemy.width, 
+                                y: enemy.y + enemy.height, // Bottom of tank
+                                id: Math.random().toString(), 
+                                stage: 10, 
+                                active: true,
+                                type: 'smoke'
+                            });
+                        }
+                    } else {
+                        enemy.introState = 'FIGHT';
+                    }
+                    return;
+                }
+            }
+            // --- END CINEMATIC LOGIC ---
+
+            // Skip AI if not fighting
+            if (enemy.introState && enemy.introState !== 'FIGHT') return;
+
+
             const isEnraged = enemy.hp <= enemy.maxHp / 2;
             
             // Phase 2 Logic (Glasscannon + Chaotic Movement)
@@ -656,7 +792,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 b2.active = false;
                 const midX = (b1.x + b2.x) / 2;
                 const midY = (b1.y + b2.y) / 2;
-                explosionsRef.current.push({ x: midX - 10, y: midY - 10, id: Math.random().toString(), stage: 5, active: true });
+                explosionsRef.current.push({ x: midX - 10, y: midY - 10, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
             }
         }
     }
@@ -696,7 +832,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const mapHit = checkBulletMapCollision(b);
         if (mapHit.hit) {
             b.active = false;
-            explosionsRef.current.push({ x: b.x - 10, y: b.y - 10, id: Math.random().toString(), stage: 5, active: true });
+            explosionsRef.current.push({ x: b.x - 10, y: b.y - 10, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
             if (mapHit.tileX >= 0) damageTile(mapHit.tileX, mapHit.tileY);
             if (!baseActiveRef.current) setGameState(GameState.GAME_OVER);
         }
@@ -709,15 +845,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Check if player bullet hit enemy
                     if (checkRectCollision(b, e)) {
                         b.active = false;
-                        e.hp -= 1;
+                        
+                        // Invulnerable during Intro
+                        if (e.introState && e.introState !== 'FIGHT') return;
+
+                        // Damage Logic
+                        let damage = 1;
+                        // Boss Defense Buff Mechanic
+                        if (e.type === 'boss' && e.defenseBuffTimer && e.defenseBuffTimer > 0) {
+                            damage = 0.5; // 50% Damage Reduction
+                            // Visual indication of block?
+                            explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 3, active: true, type: 'smoke' }); // Grey smoke for "block"
+                        }
+
+                        e.hp -= damage;
+                        
                         if (e.hp <= 0) {
                             e.isDead = true;
-                            setScore(prev => prev + (e.type === 'boss' ? 500 : 100)); // More points for boss
+                            setScore(prev => prev + (e.type === 'boss' ? 20 : 1)); // Updated scoring here
                             setEnemiesLeft(prev => prev - 1);
-                            explosionsRef.current.push({ x: e.x, y: e.y, id: Math.random().toString(), stage: 10, active: true });
+                            explosionsRef.current.push({ x: e.x, y: e.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
                         } else {
                             // Hit effect
-                            explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 3, active: true });
+                            explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 3, active: true, type: 'standard' });
                         }
                     }
                 });
@@ -728,12 +878,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     
                     if (player.hp <= 0) {
                          player.isDead = true;
-                         explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true });
+                         explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
                          setGameState(GameState.GAME_OVER);
                          onPlayerDeath();
                     } else {
                          // Small explosion on player hit to indicate damage
-                         explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true });
+                         explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
                     }
                 }
             }
@@ -745,7 +895,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // For level 1, checking spawn count. For level 2, just checking if Jugg is dead (since spawned is 0)
     const allDead = enemiesRef.current.length > 0 && enemiesRef.current.every(e => e.isDead);
     
-    if (level === 1) {
+    if (level === 1 || level === 3) {
         if (enemiesToSpawnRef.current === 0 && aliveEnemies === 0 && enemiesRef.current.length > 0 && allDead) {
             setGameState(GameState.VICTORY);
         }
@@ -852,39 +1002,94 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                      ctx.fillRect(px + 6, py + 22, 4, 4);
                      ctx.fillRect(px + 22, py + 22, 4, 4);
                 }
+            } else if (tile === TileType.FOG) {
+                 // Fog Block Rendering
+                 // Semi-transparent white/gray mist
+                 ctx.fillStyle = 'rgba(220, 220, 220, 0.5)'; // Milky white
+                 ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                 
+                 // Add simple noise/texture
+                 ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                 ctx.fillRect(px + 4, py + 4, TILE_SIZE/2, TILE_SIZE/2);
+                 ctx.fillRect(px + TILE_SIZE/2 + 2, py + TILE_SIZE/2 + 2, TILE_SIZE/3, TILE_SIZE/3);
             }
         }
     }
 
+    // Draw Boss Crater
+    if (level === 2 && hasBossCraterRef.current) {
+        const bossStartX = (GRID_WIDTH / 2) * TILE_SIZE - BOSS_SIZE / 2;
+        const bossStartY = TILE_SIZE * 2; // Landing spot
+        
+        ctx.save();
+        ctx.fillStyle = '#111'; // Dark crater
+        ctx.strokeStyle = '#333';
+        ctx.beginPath();
+        ctx.ellipse(bossStartX + BOSS_SIZE/2, bossStartY + BOSS_SIZE/2 + 10, BOSS_SIZE/1.5, BOSS_SIZE/4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        // Cracks from crater
+        ctx.strokeStyle = '#222';
+        ctx.beginPath();
+        ctx.moveTo(bossStartX + BOSS_SIZE/2, bossStartY + BOSS_SIZE/2);
+        ctx.lineTo(bossStartX - 20, bossStartY + 40);
+        ctx.moveTo(bossStartX + BOSS_SIZE/2, bossStartY + BOSS_SIZE/2);
+        ctx.lineTo(bossStartX + BOSS_SIZE + 20, bossStartY + 40);
+        ctx.stroke();
+        ctx.restore();
+    }
+
     // Helper to draw Tank
     const drawTank = (tank: Tank, color: string, detailColor: string = '#333') => {
+        let drawY = tank.y;
+        
+        // Handle Intro Vertical Offset
+        if (tank.introOffsetY !== undefined) {
+            drawY += tank.introOffsetY;
+        }
+
+        // Handle Pulsation (Intro Idle)
+        let scale = 1;
+        if (tank.introState === 'IDLE' && tank.introTimer) {
+             // Pulse 
+             scale = 1 + Math.sin(Date.now() / 100) * 0.05;
+        }
+
+        ctx.save();
+        const cx = tank.x + tank.width / 2;
+        const cy = drawY + tank.height / 2;
+        ctx.translate(cx, cy);
+        ctx.scale(scale, scale);
+        ctx.translate(-cx, -cy);
+
         ctx.fillStyle = color;
-        ctx.fillRect(tank.x + 4, tank.y + 4, tank.width - 8, tank.height - 8);
+        ctx.fillRect(tank.x + 4, drawY + 4, tank.width - 8, tank.height - 8);
         ctx.fillStyle = '#000'; 
         if (tank.direction === Direction.UP || tank.direction === Direction.DOWN) {
-            ctx.fillRect(tank.x, tank.y, 6, tank.height);
-            ctx.fillRect(tank.x + tank.width - 6, tank.y, 6, tank.height);
+            ctx.fillRect(tank.x, drawY, 6, tank.height);
+            ctx.fillRect(tank.x + tank.width - 6, drawY, 6, tank.height);
             ctx.fillStyle = detailColor;
             for(let i=0; i<tank.height; i+=4) {
-                ctx.fillRect(tank.x, tank.y + i, 6, 2);
-                ctx.fillRect(tank.x + tank.width - 6, tank.y + i, 6, 2);
+                ctx.fillRect(tank.x, drawY + i, 6, 2);
+                ctx.fillRect(tank.x + tank.width - 6, drawY + i, 6, 2);
             }
         } else {
-            ctx.fillRect(tank.x, tank.y, tank.width, 6);
-            ctx.fillRect(tank.x, tank.y + tank.height - 6, tank.width, 6);
+            ctx.fillRect(tank.x, drawY, tank.width, 6);
+            ctx.fillRect(tank.x, drawY + tank.height - 6, tank.width, 6);
             ctx.fillStyle = detailColor;
             for(let i=0; i<tank.width; i+=4) {
-                ctx.fillRect(tank.x + i, tank.y, 2, 6);
-                ctx.fillRect(tank.x + i, tank.y + tank.height - 6, 2, 6);
+                ctx.fillRect(tank.x + i, drawY, 2, 6);
+                ctx.fillRect(tank.x + i, drawY + tank.height - 6, 2, 6);
             }
         }
         ctx.fillStyle = color;
-        ctx.fillRect(tank.x + 8, tank.y + 8, tank.width - 16, tank.height - 16);
+        ctx.fillRect(tank.x + 8, drawY + 8, tank.width - 16, tank.height - 16);
         ctx.fillStyle = '#000';
-        ctx.fillRect(tank.x + 12, tank.y + 12, tank.width - 24, tank.height - 24);
+        ctx.fillRect(tank.x + 12, drawY + 12, tank.width - 24, tank.height - 24);
         ctx.fillStyle = '#EEE'; 
         const centerX = tank.x + tank.width/2;
-        const centerY = tank.y + tank.height/2;
+        const centerY = drawY + tank.height/2;
         const barrelWidth = tank.width > 32 ? 8 : 4; // Thicker barrel for boss
         const barrelLen = tank.width > 32 ? 22 : 14;
         
@@ -892,6 +1097,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         else if (tank.direction === Direction.DOWN) ctx.fillRect(centerX - barrelWidth/2, centerY, barrelWidth, barrelLen);
         else if (tank.direction === Direction.LEFT) ctx.fillRect(centerX - barrelLen, centerY - barrelWidth/2, barrelLen, barrelWidth);
         else if (tank.direction === Direction.RIGHT) ctx.fillRect(centerX, centerY - barrelWidth/2, barrelLen, barrelWidth);
+
+        ctx.restore();
     };
 
     if (!playerRef.current.isDead) {
@@ -904,10 +1111,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Draw Enemies (including Boss, but without health bar above)
     enemiesRef.current.forEach(e => {
         if (e.type === 'boss') {
-            const isEnraged = e.hp <= e.maxHp / 2;
-            const mainColor = isEnraged ? '#FF4500' : COLORS.BOSS; // Brighter red/orange when enraged
-            const detailColor = isEnraged ? '#FFFF00' : COLORS.BOSS_DETAIL;
-            drawTank(e, mainColor, detailColor);
+            if (e.introState !== 'HIDDEN') {
+                const isEnraged = e.hp <= e.maxHp / 2;
+                const mainColor = isEnraged ? '#FF4500' : COLORS.BOSS; // Brighter red/orange when enraged
+                const detailColor = isEnraged ? '#FFFF00' : COLORS.BOSS_DETAIL;
+                drawTank(e, mainColor, detailColor);
+            }
         } else {
             drawTank(e, COLORS.ENEMY);
         }
@@ -960,6 +1169,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.fillStyle = '#00FF00'; // Green
             ctx.font = "12px 'Press Start 2P'";
             ctx.fillText("HEAL", e.x, e.y - (20 - e.stage));
+        } else if ((e as any).type === 'smoke') {
+            // Draw gray smoke
+            ctx.fillStyle = `rgba(150, 150, 150, ${e.stage / 15})`; // Lighter smoke
+            const size = (15 - e.stage) * 3;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, size, 0, Math.PI * 2);
+            ctx.fill();
+        } else if ((e as any).type === 'impact') {
+            // Big impact explosion
+            ctx.fillStyle = `rgba(50, 20, 0, ${e.stage / 15})`;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, (20 - e.stage) * 8, 0, Math.PI * 2);
+            ctx.fill();
         } else {
             ctx.fillStyle = `rgba(255, 69, 0, ${e.stage / 10})`;
             const center = { x: e.x + 14, y: e.y + 14 };
@@ -982,15 +1204,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         }
     }
 
-    // Draw Boss HUD if Boss Exists
     const boss = enemiesRef.current.find(e => e.type === 'boss');
-    if (boss) {
+
+    // Draw Boss HUD if Boss Exists and is Active (Fighting)
+    if (boss && boss.introState === 'FIGHT') {
         // Bar dimensions
         const barWidth = CANVAS_WIDTH * 0.6;
         const barHeight = 16;
         const barX = (CANVAS_WIDTH - barWidth) / 2;
         const barY = 30; // Top of screen
         const isEnraged = boss.hp <= boss.maxHp / 2;
+        const isDefended = boss.defenseBuffTimer && boss.defenseBuffTimer > 0;
 
         // Boss Name
         ctx.fillStyle = '#FFF';
@@ -1005,20 +1229,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // Health
         const hpPercent = boss.hp / boss.maxHp;
         
-        if (isEnraged) {
-            // Pulse logic for fire effect
-            const time = Date.now();
-            const pulse = Math.abs(Math.sin(time / 200)); // 0 to 1
+        // Color Logic
+        const time = Date.now();
+        const pulse = Math.abs(Math.sin(time / 200)); // 0 to 1
+        
+        if (isDefended) {
+            // Steel / Silver Pulse for Defense
+            const val = 100 + Math.floor(pulse * 155); // 100 to 255
+            ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
+            ctx.shadowColor = '#FFFFFF';
+            ctx.shadowBlur = 10 + pulse * 5;
+        } else if (isEnraged) {
+            // Enraged Pulse
             const r = 255;
             const g = Math.floor(pulse * 150); // 0 to 150
             const b = 0;
-            
             ctx.fillStyle = `rgb(${r},${g},${b})`;
-            
             // Fire Glow
             ctx.shadowColor = `rgb(255, ${Math.floor(pulse * 100)}, 0)`;
             ctx.shadowBlur = 10 + pulse * 10;
         } else {
+            // Standard Red
             ctx.fillStyle = '#ff0000';
             ctx.shadowBlur = 0;
         }
@@ -1032,7 +1263,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.strokeRect(barX, barY, barWidth, barHeight);
     }
 
-  }, []);
+  }, [level]);
 
   useEffect(() => {
     let animationFrameId: number;

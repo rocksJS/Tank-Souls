@@ -18,6 +18,7 @@ export enum TileType {
   STEEL_DAMAGED_1 = 8, // 12-15 HP (Light cracks)
   STEEL_DAMAGED_2 = 9, // 8-11 HP (Medium cracks)
   STEEL_DAMAGED_3 = 10, // 1-7 HP (Heavy damage)
+  FOG = 11, // New Fog Block
 }
 
 export interface Position {
@@ -39,6 +40,12 @@ export interface Tank extends Entity {
   isDead: boolean;
   hp: number;
   maxHp: number;
+  // Boss Intro Specifics
+  introState?: 'HIDDEN' | 'FALLING' | 'LANDING' | 'IDLE' | 'FIGHT';
+  introOffsetY?: number; // For falling animation
+  introTimer?: number;
+  // Boss Mechanics
+  defenseBuffTimer?: number; // Frames remaining for 50% damage reduction
 }
 
 export interface Bullet extends Entity {
@@ -53,6 +60,7 @@ export interface Explosion extends Position {
   id: string;
   stage: number; // For animation
   active: boolean;
+  type?: 'standard' | 'heal' | 'smoke' | 'impact';
 }
 
 export type GameMap = TileType[][];
