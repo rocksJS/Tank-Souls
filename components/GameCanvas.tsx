@@ -432,7 +432,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
                     if (checkRectCollision(b, e)) {
                         b.active = false;
                         e.isDead = true; // Mark for removal
-                        setScore(prev => prev + 100);
+                        setScore(prev => prev + 1);
                         setEnemiesLeft(prev => prev - 1);
                         explosionsRef.current.push({ x: e.x, y: e.y, id: Math.random().toString(), stage: 10, active: true });
                     }

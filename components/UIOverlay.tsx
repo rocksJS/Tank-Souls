@@ -43,17 +43,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
                 I
              </button>
              <button 
-                onClick={() => unlockedLevel >= 2 && setLevel(2)}
-                disabled={unlockedLevel < 2}
+                onClick={() => setLevel(2)}
                 className={`text-lg transition-all duration-300 relative ${
                     level === 2 ? 'text-gray-100 border-b border-gray-100' : 
-                    unlockedLevel >= 2 ? 'text-gray-600 hover:text-gray-400' : 'text-gray-800 cursor-not-allowed'
+                    'text-gray-600 hover:text-gray-400'
                 }`}
              >
                 II
-                {unlockedLevel < 2 && (
-                    <span className="absolute -top-2 -right-3 text-[10px] text-red-900 font-bold">×</span>
-                )}
              </button>
           </div>
 
