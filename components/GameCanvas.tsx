@@ -34,7 +34,9 @@ import {
   SALLY_LASER_WIDTH,
   SALLY_LASER_TRACE_DURATION,
   SALLY_SHOTGUN_BURST_DELAY,
-  SALLY_SHOTGUN_BULLET_COUNT
+  SALLY_SHOTGUN_BULLET_COUNT,
+  SALLY_PETRIFY_DURATION,
+  SALLY_PHASE_4_BASE_SPEED
 } from '../constants';
 import {
   Direction,
@@ -230,7 +232,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             defenseBuffTimer: 0,
             specialState: 'IDLE',
             specialTimer: 0,
-            aimAngle: 0
+            aimAngle: 0,
+            phase: 1,
+            petrifyTimer: 0
         });
         bossSpawnedRef.current = true;
     }
@@ -590,12 +594,44 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             
             // SALLY SPECIALS: FIRE AURA & LASER
             if (enemy.id === 'SALLY' && !enemy.isDead) {
-                // Emit Fire Particles
-                if (Math.random() > 0.3) {
+                // --- SALLY PHASE LOGIC ---
+                const hpPercent = enemy.hp / enemy.maxHp;
+                if (!enemy.phase) enemy.phase = 1;
+
+                // Check Phase Transitions
+                if (hpPercent <= 0.25 && enemy.phase < 4) {
+                    enemy.phase = 4;
+                    // Init Phase 4 Physics (Arc/Bounce)
+                    // Pick a random starting diagonal velocity
+                    const angle = Math.random() * Math.PI * 2;
+                    enemy.vx = Math.cos(angle) * SALLY_PHASE_4_BASE_SPEED;
+                    enemy.vy = Math.sin(angle) * SALLY_PHASE_4_BASE_SPEED;
+                    // Reset Specials
+                    enemy.specialState = 'IDLE'; 
+                    explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 30, active: true, type: 'impact' });
+                } else if (hpPercent <= 0.50 && enemy.phase < 3) {
+                    enemy.phase = 3;
+                    explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 20, active: true, type: 'glitch', color: '#FF0000' });
+                } else if (hpPercent <= 0.75 && enemy.phase < 2) {
+                    enemy.phase = 2;
+                    enemy.petrifyTimer = SALLY_PETRIFY_DURATION;
+                    explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 30, active: true, type: 'smoke' });
+                }
+
+                // Phase 2 Petrify Logic
+                if (enemy.phase === 2) {
+                    if (enemy.petrifyTimer && enemy.petrifyTimer > 0) {
+                        enemy.petrifyTimer--;
+                    }
+                }
+
+                // Emit Fire Particles (except in Petrify/Phase 2)
+                if (enemy.phase !== 2 && Math.random() > 0.3) {
                      const cx = enemy.x + enemy.width/2;
                      const cy = enemy.y + enemy.height/2;
                      const angle = Math.random() * Math.PI * 2;
                      const dist = enemy.width / 1.5; // Orbit
+                     const type = enemy.phase === 4 ? 'glitch' : 'fire'; // Glitch in Phase 4
                      
                      explosionsRef.current.push({
                          x: cx + Math.cos(angle) * dist,
@@ -603,39 +639,130 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                          id: Math.random().toString(),
                          stage: 20 + Math.floor(Math.random() * 10),
                          active: true,
-                         type: 'fire',
+                         type: type as any,
                          vx: (Math.random() - 0.5) * 0.5,
                          vy: -1 - Math.random(), // Float up
                      });
                 }
 
-                // --- SALLY LASER + SHOTGUN LOGIC ---
+                // --- SALLY PHASE 4: MADNESS & EATING ---
+                if (enemy.phase === 4) {
+                    // Update Position based on Physics
+                    const vx = enemy.vx || 0;
+                    const vy = enemy.vy || 0;
+                    
+                    let nextX = enemy.x + vx;
+                    let nextY = enemy.y + vy;
+                    
+                    // Simple Acceleration on bounce
+                    const accelerate = 1.05;
+                    const maxSpeed = SALLY_PHASE_4_BASE_SPEED * 2.5;
+
+                    // Wall Collision (Bounce)
+                    let bounced = false;
+                    if (nextX < 0 || nextX + enemy.width > CANVAS_WIDTH || checkMapCollision({...enemy, x: nextX, y: enemy.y})) {
+                        enemy.vx = -vx * accelerate;
+                        // Clamp speed
+                        if (Math.abs(enemy.vx) > maxSpeed) enemy.vx = Math.sign(enemy.vx) * maxSpeed;
+                        nextX = enemy.x + enemy.vx;
+                        bounced = true;
+                    } else {
+                        enemy.x = nextX;
+                    }
+
+                    if (nextY < 0 || nextY + enemy.height > CANVAS_HEIGHT || checkMapCollision({...enemy, x: enemy.x, y: nextY})) {
+                        enemy.vy = -vy * accelerate;
+                        if (Math.abs(enemy.vy) > maxSpeed) enemy.vy = Math.sign(enemy.vy) * maxSpeed;
+                        nextY = enemy.y + enemy.vy;
+                        bounced = true;
+                    } else {
+                        enemy.y = nextY;
+                    }
+                    
+                    if (bounced) {
+                        explosionsRef.current.push({ x: enemy.x + enemy.width/2, y: enemy.y + enemy.height/2, id: Math.random().toString(), stage: 10, active: true, type: 'impact' });
+                    }
+
+                    // Homing / Steering towards Player (Try to eat)
+                    if (!player.isDead) {
+                        const ex = enemy.x + enemy.width/2;
+                        const ey = enemy.y + enemy.height/2;
+                        const px = player.x + player.width/2;
+                        const py = player.y + player.height/2;
+                        
+                        const angleToPlayer = Math.atan2(py - ey, px - ex);
+                        const steerStrength = 0.15; // How hard it turns
+                        
+                        if (enemy.vx !== undefined && enemy.vy !== undefined) {
+                            enemy.vx += Math.cos(angleToPlayer) * steerStrength;
+                            enemy.vy += Math.sin(angleToPlayer) * steerStrength;
+                        }
+                        
+                        // Contact Damage (Instant Kill)
+                        if (checkRectCollision(enemy, player)) {
+                            player.hp = 0;
+                            player.isDead = true;
+                            setGameState(GameState.GAME_OVER);
+                            onPlayerDeath();
+                            explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 20, active: true, type: 'impact' });
+                        }
+                    }
+
+                    // No shooting in Phase 4
+                    return; 
+                }
+
+                // --- SALLY LASER + SHOTGUN LOGIC (Phases 1-3) ---
                 // State Machine: IDLE -> PRE_CHARGE -> CHARGING -> FIRING -> SHOTGUN -> IDLE
                 if (enemy.specialState === 'IDLE' || !enemy.specialState) {
                     if (enemy.specialTimer === undefined) enemy.specialTimer = SALLY_LASER_COOLDOWN;
                     
-                    // Standard movement logic only during IDLE
+                    // Movement Logic (Phase 1, 2, 3)
                     if (!player.isDead) {
-                        const centerX = enemy.x + enemy.width / 2;
-                        const centerY = enemy.y + enemy.height / 2;
-                        const pCenterX = player.x + player.width / 2;
-                        const pCenterY = player.y + player.height / 2;
-                        
-                        // Horizontal Approach
-                        if (Math.abs(centerX - pCenterX) > 10) {
-                             const dx = pCenterX > centerX ? enemy.speed : -enemy.speed;
-                             if (!checkMapCollision({...enemy, x: enemy.x + dx})) {
-                                 enemy.x += dx;
-                                 enemy.direction = dx > 0 ? Direction.RIGHT : Direction.LEFT;
-                             }
-                        }
-                        // Vertical Approach
-                        if (Math.abs(centerY - pCenterY) > 10) {
-                             const dy = pCenterY > centerY ? enemy.speed : -enemy.speed;
-                             if (!checkMapCollision({...enemy, y: enemy.y + dy})) {
-                                 enemy.y += dy;
-                                 enemy.direction = dy > 0 ? Direction.DOWN : Direction.UP;
-                             }
+                        // PHASE 3: MIRRORED MOVEMENT (Madness)
+                        if (enemy.phase === 3) {
+                            const lastKey = moveKeysRef.current[moveKeysRef.current.length - 1];
+                            let dx = 0;
+                            let dy = 0;
+                            const speed = enemy.speed * 1.25; // 25% faster
+
+                            // Mirror Input: Player Up -> Boss Down
+                            if (lastKey === 'ArrowUp' || lastKey === 'KeyW') { dy = speed; enemy.direction = Direction.DOWN; }
+                            else if (lastKey === 'ArrowDown' || lastKey === 'KeyS') { dy = -speed; enemy.direction = Direction.UP; }
+                            else if (lastKey === 'ArrowLeft' || lastKey === 'KeyA') { dx = speed; enemy.direction = Direction.RIGHT; }
+                            else if (lastKey === 'ArrowRight' || lastKey === 'KeyD') { dx = -speed; enemy.direction = Direction.LEFT; }
+                            
+                            // Apply Movement if not colliding
+                            if (dx !== 0) {
+                                if (!checkMapCollision({...enemy, x: enemy.x + dx})) enemy.x += dx;
+                            }
+                            if (dy !== 0) {
+                                if (!checkMapCollision({...enemy, y: enemy.y + dy})) enemy.y += dy;
+                            }
+                        } 
+                        // PHASE 1 & 2: Standard Logic
+                        else {
+                            const centerX = enemy.x + enemy.width / 2;
+                            const centerY = enemy.y + enemy.height / 2;
+                            const pCenterX = player.x + player.width / 2;
+                            const pCenterY = player.y + player.height / 2;
+                            
+                            // Horizontal Approach
+                            if (Math.abs(centerX - pCenterX) > 10) {
+                                 const dx = pCenterX > centerX ? enemy.speed : -enemy.speed;
+                                 if (!checkMapCollision({...enemy, x: enemy.x + dx})) {
+                                     enemy.x += dx;
+                                     enemy.direction = dx > 0 ? Direction.RIGHT : Direction.LEFT;
+                                 }
+                            }
+                            // Vertical Approach
+                            if (Math.abs(centerY - pCenterY) > 10) {
+                                 const dy = pCenterY > centerY ? enemy.speed : -enemy.speed;
+                                 if (!checkMapCollision({...enemy, y: enemy.y + dy})) {
+                                     enemy.y += dy;
+                                     enemy.direction = dy > 0 ? Direction.DOWN : Direction.UP;
+                                 }
+                            }
                         }
                     }
 
@@ -1173,6 +1300,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         // Invulnerable during Intro
                         if (e.introState && e.introState !== 'FIGHT') return;
 
+                        // Sally Phase 2 Petrified - INVULNERABLE
+                        if (e.id === 'SALLY' && e.phase === 2 && e.petrifyTimer && e.petrifyTimer > 0) {
+                             explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 5, active: true, type: 'smoke' }); // Stone dust
+                             return;
+                        }
+
                         // Damage Logic
                         let damage = 1;
                         // Boss Defense Buff Mechanic
@@ -1390,13 +1523,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const cx = tank.x + tank.width / 2;
         const cy = tank.y + tank.height / 2;
         const radius = tank.width / 2;
+        
+        // Phase 2: Stone / Petrification look
+        const isPetrified = tank.phase === 2 && tank.petrifyTimer && tank.petrifyTimer > 0;
+        // Phase 4: Terrifying / Scary look
+        const isScary = tank.phase === 4;
 
         ctx.save();
         ctx.translate(cx, cy);
 
         // Rotation: If aiming, look at target. Else look in move direction.
+        // Phase 4: Spin or look at movement vector
         let rotation = 0;
-        if (tank.specialState && tank.specialState !== 'IDLE' && tank.aimAngle !== undefined) {
+        
+        if (isScary) {
+            // In Phase 4, look in movement direction (velocity)
+            if (tank.vx !== undefined && tank.vy !== undefined) {
+                rotation = Math.atan2(tank.vy, tank.vx);
+            }
+        } else if (tank.specialState && tank.specialState !== 'IDLE' && tank.aimAngle !== undefined) {
             rotation = tank.aimAngle;
         } else {
             // Map Direction enum to radians
@@ -1407,13 +1552,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 case Direction.UP: rotation = -Math.PI / 2; break;
             }
         }
+        
         // Rotate so 0 (Right) aligns with the drawing orientation
-        // We'll draw the face looking Right by default
         ctx.rotate(rotation);
 
         // Shake effect when charging/firing
-        if (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') {
-             ctx.translate((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+        if (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING' || isScary) {
+             const shakeAmt = isScary ? 3 : 2;
+             ctx.translate((Math.random() - 0.5) * shakeAmt, (Math.random() - 0.5) * shakeAmt);
         }
 
         // --- Snakes (Hair) ---
@@ -1421,12 +1567,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const numSnakes = 12;
         
         for (let i = 0; i < numSnakes; i++) {
-            // Only wiggle snakes on the back half of the head (left side if facing right)
-            // Angles from PI/2 to 3PI/2
             const baseAngle = Math.PI/2 + (Math.PI / (numSnakes-1)) * i;
             
             // Wiggle
-            const wiggleOffset = Math.sin(time * 3 + i) * 0.2;
+            let wiggleOffset = Math.sin(time * 3 + i) * 0.2;
+            if (isScary) wiggleOffset = Math.sin(time * 10 + i) * 0.4; // Violent wiggle
+            if (isPetrified) wiggleOffset = 0; // Frozen
+
             const currentAngle = baseAngle + wiggleOffset;
             
             const len = radius * 0.8;
@@ -1435,7 +1582,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             const ex = Math.cos(currentAngle) * (radius + len);
             const ey = Math.sin(currentAngle) * (radius + len);
 
-            ctx.strokeStyle = '#2E8B57'; // Sea Green
+            ctx.strokeStyle = isPetrified ? '#555' : (isScary ? '#1a0500' : '#2E8B57'); 
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             ctx.beginPath();
@@ -1447,47 +1594,78 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.stroke();
             
             // Head
-            ctx.fillStyle = '#006400';
+            ctx.fillStyle = isPetrified ? '#444' : (isScary ? '#330000' : '#006400');
             ctx.beginPath();
             ctx.arc(ex, ey, 3, 0, Math.PI*2);
             ctx.fill();
         }
 
         // --- Face Base ---
-        ctx.fillStyle = (tank.specialState === 'CHARGING') ? '#6B8E23' : '#8FBC8F'; // DarkOliveGreen vs DarkSeaGreen
+        let faceColor = '#8FBC8F'; // Default green
+        if (isPetrified) faceColor = '#777'; // Stone
+        else if (isScary) faceColor = '#2F4F4F'; // Dark Slate (Scary)
+        else if (tank.specialState === 'CHARGING') faceColor = '#6B8E23'; 
+
+        ctx.fillStyle = faceColor;
         ctx.beginPath();
-        // Slightly oval
         ctx.ellipse(0, 0, radius * 0.7, radius * 0.65, 0, 0, Math.PI*2);
         ctx.fill();
         
         // --- Facial Features (Oriented to face Right) ---
         
         // Eyes
-        const eyeColor = (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') ? '#FF0000' : '#FFFFE0';
-        const eyeGlow = (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') ? 20 : 0;
+        let eyeColor = '#FFFFE0';
+        let eyeGlow = 0;
+        
+        if (isPetrified) { eyeColor = '#555'; eyeGlow = 0; }
+        else if (isScary) { eyeColor = '#FF0000'; eyeGlow = 30; }
+        else if (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') { eyeColor = '#FF0000'; eyeGlow = 20; }
         
         ctx.fillStyle = eyeColor;
         ctx.shadowColor = eyeColor;
         ctx.shadowBlur = eyeGlow;
 
         // Eyes position relative to center (facing right)
-        // Left Eye (Y-)
         ctx.beginPath();
-        ctx.ellipse(radius * 0.3, -radius * 0.25, 5, 8, 0, 0, Math.PI*2);
-        ctx.fill();
-
-        // Right Eye (Y+)
-        ctx.beginPath();
-        ctx.ellipse(radius * 0.3, radius * 0.25, 5, 8, 0, 0, Math.PI*2);
-        ctx.fill();
+        // Scary eyes might be larger or slanted
+        if (isScary) {
+            ctx.ellipse(radius * 0.3, -radius * 0.25, 7, 10, -0.2, 0, Math.PI*2); // Angry slant
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(radius * 0.3, radius * 0.25, 7, 10, 0.2, 0, Math.PI*2); // Angry slant
+            ctx.fill();
+        } else {
+            ctx.ellipse(radius * 0.3, -radius * 0.25, 5, 8, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(radius * 0.3, radius * 0.25, 5, 8, 0, 0, Math.PI*2);
+            ctx.fill();
+        }
         
         ctx.shadowBlur = 0;
 
         // Mouth
-        ctx.strokeStyle = '#004d00';
+        ctx.strokeStyle = isPetrified ? '#333' : '#004d00';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        if (tank.specialState === 'FIRING') {
+        if (isScary) {
+            // Scream mouth
+            ctx.fillStyle = '#000';
+            ctx.ellipse(radius * 0.4, 0, 10, 15, 0, 0, Math.PI*2);
+            ctx.fill();
+            // Teeth
+            ctx.fillStyle = '#FFF';
+            ctx.beginPath();
+            ctx.moveTo(radius * 0.4, -15);
+            ctx.lineTo(radius * 0.45, -5);
+            ctx.lineTo(radius * 0.35, -5);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(radius * 0.4, 15);
+            ctx.lineTo(radius * 0.45, 5);
+            ctx.lineTo(radius * 0.35, 5);
+            ctx.fill();
+        } else if (tank.specialState === 'FIRING') {
             // Open mouth (O shape)
             ctx.fillStyle = '#330000';
             ctx.ellipse(radius * 0.4, 0, 8, 12, 0, 0, Math.PI*2);
@@ -1551,6 +1729,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // --- SALLY SPECIAL RENDER ---
         if (tank.id === 'SALLY') {
+            // Draw Tank Chassis under Medusa
+            // Reuse standard tank drawing logic but specialized color
+            const isPetrified = tank.phase === 2 && tank.petrifyTimer && tank.petrifyTimer > 0;
+            const chassisColor = isPetrified ? '#555' : (tank.phase === 4 ? '#220000' : '#4b5320'); // Dark red in phase 4
+
+            ctx.save();
+            // Translate for tank chassis
+            const cx = drawX + tank.width / 2;
+            const cy = drawY + tank.height / 2;
+            ctx.translate(cx, cy);
+            
+            // Rotate chassis if moving
+            // In Phase 4, rotate to movement
+            let chassisRot = 0;
+            if (tank.phase === 4 && tank.vx !== undefined && tank.vy !== undefined) {
+                 chassisRot = Math.atan2(tank.vy, tank.vx) + Math.PI/2; // Base tank faces UP usually, standard drawing expects UP
+                 // Standard drawing logic below is axis aligned. We might need to rotate context.
+                 // Actually, standard drawing relies on tank.direction.
+                 // Let's just draw the chassis rects rotated manually here.
+                 ctx.rotate(chassisRot - Math.PI/2); // Align right to 0
+            }
+
+            // Simple chassis rect
+            ctx.fillStyle = chassisColor;
+            ctx.fillRect(-tank.width/2 + 2, -tank.height/2 + 2, tank.width - 4, tank.height - 4);
+            
+            // Treads
+            ctx.fillStyle = '#111';
+            // Left Tread
+            ctx.fillRect(-tank.width/2, -tank.height/2, tank.width, 6);
+            // Right Tread
+            ctx.fillRect(-tank.width/2, tank.height/2 - 6, tank.width, 6);
+            
+            ctx.restore();
+
+            // Draw Head
             drawMedusa(tank);
             
             // DRAW LASER BEAM (Needs global coords, so we draw it here after Medusa returns context)
@@ -1801,6 +2015,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const barY = 30; // Top of screen
         const isEnraged = boss.hp <= boss.maxHp / 2;
         const isDefended = boss.defenseBuffTimer && boss.defenseBuffTimer > 0;
+        // Phase 2 Petrified
+        const isPetrified = boss.phase === 2 && boss.petrifyTimer && boss.petrifyTimer > 0;
 
         // Boss Name
         ctx.fillStyle = '#FFF';
@@ -1808,7 +2024,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.textAlign = 'center';
         
         let bossName = "JUGGERNAUT";
-        if (boss.id === 'SALLY') bossName = "SALLY";
+        if (boss.id === 'SALLY') {
+             if (boss.phase === 4) bossName = "SALLY (RAGE)";
+             else if (isPetrified) bossName = "SALLY (PETRIFIED)";
+             else bossName = "SALLY";
+        }
         
         ctx.fillText(bossName, CANVAS_WIDTH / 2, barY - 10);
 
@@ -1823,7 +2043,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const time = Date.now();
         const pulse = Math.abs(Math.sin(time / 200)); // 0 to 1
         
-        if (isDefended) {
+        if (isPetrified) {
+            // Stone Grey Texture
+            ctx.fillStyle = '#666'; 
+            ctx.shadowBlur = 0;
+        } else if (isDefended) {
             // Steel / Silver Pulse for Defense
             const val = 100 + Math.floor(pulse * 155); // 100 to 255
             ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;

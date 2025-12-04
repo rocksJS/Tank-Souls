@@ -36,6 +36,10 @@ export const GLASSCANNON_SIZE = BULLET_SIZE * 3;
 export const GLASSCANNON_SPEED_FACTOR = 0.5; // 50% of owner's bullet speed
 export const BOSS_RAGE_SPEED_MULT = 3.0; // 3x speed in rage mode dashes
 
+// Sally Mechanics
+export const SALLY_PETRIFY_DURATION = 480; // 8 seconds (60fps)
+export const SALLY_PHASE_4_BASE_SPEED = 4.0;
+
 // Sally Laser Ability
 export const SALLY_LASER_COOLDOWN = 180; // 3 seconds between cycles
 export const SALLY_PRE_CHARGE = 6; // 0.1 seconds

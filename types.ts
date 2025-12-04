@@ -55,6 +55,12 @@ export interface Tank extends Entity {
   specialTimer?: number;
   aimAngle?: number;
   burstCount?: number; // For shotgun bursts
+  
+  // Sally Phases
+  phase?: 1 | 2 | 3 | 4;
+  petrifyTimer?: number; // Phase 2 Invulnerability
+  vx?: number; // Phase 4 Physics X
+  vy?: number; // Phase 4 Physics Y
 }
 
 export interface Bullet extends Entity {
