@@ -14,6 +14,7 @@ const App: React.FC = () => {
   
   const [gameSessionId, setGameSessionId] = useState<number>(0);
   const [isGameInProgress, setIsGameInProgress] = useState<boolean>(false);
+  const [deathCount, setDeathCount] = useState<number>(0);
 
   // Handle Victory unlocking logic and game progress state
   useEffect(() => {
@@ -39,6 +40,10 @@ const App: React.FC = () => {
       setGameState(GameState.PLAYING);
   };
 
+  const handlePlayerDeath = () => {
+      setDeathCount(prev => prev + 1);
+  };
+
   return (
     <div className="min-h-screen flex justify-center pt-32 pb-12">
       <div className="relative">
@@ -54,6 +59,7 @@ const App: React.FC = () => {
                     setEnemiesLeft={setEnemiesLeft}
                     level={level}
                     gameSessionId={gameSessionId}
+                    onPlayerDeath={handlePlayerDeath}
                  />
                  <UIOverlay 
                     gameState={gameState} 
@@ -66,6 +72,7 @@ const App: React.FC = () => {
                     setLevel={setLevel}
                     unlockedLevel={unlockedLevel}
                     isGameInProgress={isGameInProgress}
+                    deathCount={deathCount}
                  />
              </div>
              

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { GameState } from '../types';
 
 interface UIOverlayProps {
@@ -12,9 +12,36 @@ interface UIOverlayProps {
   setLevel: (level: number) => void;
   unlockedLevel: number;
   isGameInProgress: boolean;
+  deathCount: number;
 }
 
-const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress }) => {
+const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress, deathCount }) => {
+  
+  // Keyboard listener for quick restart and start
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (gameState === GameState.MENU) {
+            if (e.code === 'ArrowLeft') {
+                setLevel(Math.max(1, level - 1));
+            } else if (e.code === 'ArrowRight') {
+                setLevel(Math.min(2, level + 1));
+            }
+        }
+
+        if (e.code === 'Space' || e.code === 'Enter') {
+            if (gameState === GameState.GAME_OVER) {
+                startGame();
+            } else if (gameState === GameState.MENU) {
+                startGame();
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [gameState, startGame, level, setLevel]);
+
   return (
     <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col items-center justify-center font-serif">
       
@@ -30,12 +57,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
           <h1 className="text-6xl md:text-7xl text-gray-200 mb-2 drop-shadow-lg tracking-widest font-gothic">
             Tank Souls
           </h1>
-          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-gray-500 to-transparent mx-auto mb-8"></div>
+          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-gray-500 to-transparent mx-auto mb-4"></div>
           
-          <p className="text-gray-500 mb-8 text-xs font-mono uppercase tracking-[0.3em]">The Darkest Tank Battle</p>
+          <p className="text-gray-500 mb-4 text-xs font-mono uppercase tracking-[0.3em]">The Darkest Tank Battle</p>
           
+          {deathCount > 0 && (
+             <p className="text-red-900/80 mb-6 text-sm font-serif tracking-widest uppercase">
+                Total Deaths: {deathCount}
+             </p>
+          )}
+
           {/* Level Selector */}
-          <div className="mb-10 flex gap-6 justify-center">
+          <div className="mb-10 flex gap-6 justify-center items-center">
              <button 
                 onClick={() => setLevel(1)}
                 className={`text-lg transition-all duration-300 ${level === 1 ? 'text-gray-100 border-b border-gray-100' : 'text-gray-600 hover:text-gray-400'}`}
@@ -51,6 +84,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
              >
                 II
              </button>
+             <div className="absolute bottom-0 right-0 text-[10px] text-gray-700 p-2 opacity-50 uppercase tracking-widest">
+                Use Arrows to Select
+             </div>
           </div>
 
           <button
@@ -60,6 +96,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
             <span className="absolute inset-0 w-full h-full bg-gray-800/20 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left"></span>
             <span className="relative tracking-widest uppercase">Begin Journey</span>
           </button>
+          
+          <div className="text-xs text-gray-600 tracking-widest uppercase animate-pulse mb-2 mt-2">
+            Press [SPACE] to Start
+          </div>
           
           {isGameInProgress && (
               <button
@@ -81,18 +121,25 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
           </h2>
           <div className="w-full h-px bg-gradient-to-r from-transparent via-red-900 to-transparent mb-8 opacity-50"></div>
           <p className="text-gray-500 text-lg mb-8 font-serif">Soul Memory: {score}</p>
-          <button
-            onClick={startGame}
-            className="px-8 py-2 text-gray-400 hover:text-white hover:bg-white/5 border-t border-b border-transparent hover:border-gray-600 transition-all duration-300 font-serif tracking-widest uppercase text-sm"
-          >
-            Try Again
-          </button>
-          <button
-             onClick={() => setGameState(GameState.MENU)}
-             className="mt-4 px-8 py-2 text-gray-600 hover:text-gray-400 font-serif tracking-widest uppercase text-xs"
-           >
-             Return to Menu
-           </button>
+          
+          <div className="flex flex-col gap-4 items-center">
+             <div className="text-xs text-gray-600 tracking-widest uppercase animate-pulse mb-2">
+                Press [SPACE] or [ENTER] to Restart
+             </div>
+
+             <button
+               onClick={startGame}
+               className="px-8 py-2 text-gray-400 hover:text-white hover:bg-white/5 border-t border-b border-transparent hover:border-gray-600 transition-all duration-300 font-serif tracking-widest uppercase text-sm"
+             >
+               Try Again
+             </button>
+             <button
+                onClick={() => setGameState(GameState.MENU)}
+                className="px-8 py-2 text-gray-600 hover:text-gray-400 font-serif tracking-widest uppercase text-xs"
+              >
+                Return to Menu
+              </button>
+          </div>
         </div>
       )}
 

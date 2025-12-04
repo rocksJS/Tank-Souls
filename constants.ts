@@ -7,12 +7,22 @@ export const CANVAS_WIDTH = GRID_WIDTH * TILE_SIZE;
 export const CANVAS_HEIGHT = GRID_HEIGHT * TILE_SIZE;
 
 export const PLAYER_SPEED = 2;
-export const ENEMY_SPEED = 0.375; // Reduced by 50% (was 0.75)
-export const PLAYER_BULLET_SPEED = 3.75; // Reduced by 25% (was 5)
-export const ENEMY_BULLET_SPEED = 3.25;  // Reduced by 35% (was 5)
+export const ENEMY_SPEED = 0.375;
+export const PLAYER_BULLET_SPEED = 3.75;
+export const ENEMY_BULLET_SPEED = 3.25;
 export const TANK_SIZE = 28; 
 export const BULLET_SIZE = 4;
 export const SHOOT_COOLDOWN = 30; 
+
+// Boss Constants
+export const BOSS_SIZE = 48; // Bigger tank
+export const BOSS_HP = 30;
+export const BOSS_SPEED = 0.45; // Increased by 20% (0.375 * 1.2)
+export const BOSS_SHOOT_COOLDOWN = 80; // Increased fire rate by another 50% (120 / 1.5)
+export const BOSS_BULLET_SPEED = 1.45; // Increased by ~30% (1.1 * 1.3)
+
+// Player Constants
+export const PLAYER_MAX_HP = 3;
 
 // Level 1: Standard layout (Extended height)
 const LEVEL_1 = [
@@ -40,8 +50,43 @@ const LEVEL_1 = [
   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 ];
 
-// Level 2: Empty
-const LEVEL_2 = Array(GRID_HEIGHT).fill(null).map(() => Array(GRID_WIDTH).fill(0));
+// Level 2: Boss Arena - Open space with 2x2 pillars scattered
+const LEVEL_2 = [
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  // Top Pillars
+  [0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+  [0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+  
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  // Center Top
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  // Middle Side Pillars
+  [0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  // Center Bottom
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  
+  // Bottom Pillars
+  [0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+  [0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+  
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+];
 
 export const LEVELS = [LEVEL_1, LEVEL_2];
 
@@ -59,4 +104,6 @@ export const COLORS = {
   ENEMY_ALT: '#FF0000', 
   BULLET: '#FFFFFF',
   BASE: '#FF00FF',
+  BOSS: '#5a0000', // Dark Red for Boss
+  BOSS_DETAIL: '#ff0000',
 };
