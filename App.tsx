@@ -16,6 +16,10 @@ const App: React.FC = () => {
   const [isGameInProgress, setIsGameInProgress] = useState<boolean>(false);
   const [deathCount, setDeathCount] = useState<number>(0);
 
+  // Shop Items State
+  const [estusUnlocked, setEstusUnlocked] = useState<boolean>(false);
+  const [estusCharges, setEstusCharges] = useState<number>(0);
+
   // Handle Victory unlocking logic and game progress state
   useEffect(() => {
     if (gameState === GameState.VICTORY) {
@@ -34,6 +38,13 @@ const App: React.FC = () => {
     setScore(0);
     setEnemiesLeft(20);
     setIsGameInProgress(true);
+    
+    // Reset Estus charges on level start if unlocked
+    if (estusUnlocked) {
+        setEstusCharges(3);
+    } else {
+        setEstusCharges(0);
+    }
   };
   
   const resumeGame = () => {
@@ -60,6 +71,9 @@ const App: React.FC = () => {
                     level={level}
                     gameSessionId={gameSessionId}
                     onPlayerDeath={handlePlayerDeath}
+                    estusUnlocked={estusUnlocked}
+                    estusCharges={estusCharges}
+                    setEstusCharges={setEstusCharges}
                  />
                  <UIOverlay 
                     gameState={gameState} 
@@ -73,6 +87,8 @@ const App: React.FC = () => {
                     unlockedLevel={unlockedLevel}
                     isGameInProgress={isGameInProgress}
                     deathCount={deathCount}
+                    estusUnlocked={estusUnlocked}
+                    setEstusUnlocked={setEstusUnlocked}
                  />
              </div>
              
@@ -81,6 +97,8 @@ const App: React.FC = () => {
                 score={score} 
                 level={level} 
                 setGameState={setGameState}
+                estusUnlocked={estusUnlocked}
+                estusCharges={estusCharges}
              />
         </div>
         

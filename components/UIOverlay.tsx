@@ -13,9 +13,14 @@ interface UIOverlayProps {
   unlockedLevel: number;
   isGameInProgress: boolean;
   deathCount: number;
+  estusUnlocked: boolean;
+  setEstusUnlocked: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress, deathCount }) => {
+const UIOverlay: React.FC<UIOverlayProps> = ({ 
+    gameState, setGameState, score, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress, deathCount,
+    estusUnlocked, setEstusUnlocked
+}) => {
   
   // Keyboard listener for quick restart and start
   useEffect(() => {
@@ -35,12 +40,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
                 startGame();
             }
         }
+        
+        // Escape to close shop
+        if (e.code === 'Escape' && gameState === GameState.SHOP) {
+            setGameState(isGameInProgress ? GameState.PLAYING : GameState.MENU);
+        }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
         window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [gameState, startGame, level, setLevel]);
+  }, [gameState, startGame, level, setLevel, isGameInProgress, setGameState]);
 
   return (
     <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col items-center justify-center font-serif">
@@ -110,6 +120,66 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
                 <span className="relative tracking-widest uppercase">Resume</span>
               </button>
           )}
+        </div>
+      )}
+
+      {/* Shop - Souls Style */}
+      {gameState === GameState.SHOP && (
+        <div className="bg-black/95 p-12 border border-gray-700 shadow-[0_0_60px_rgba(0,0,0,0.9)] text-center pointer-events-auto max-w-lg w-full relative overflow-hidden flex flex-col items-center">
+          {/* Decorative Corner Borders */}
+          <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-gray-500"></div>
+          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-gray-500"></div>
+          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-gray-500"></div>
+          <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-gray-500"></div>
+
+          <h1 className="text-4xl md:text-5xl text-gray-200 mb-2 drop-shadow-lg tracking-widest font-gothic">
+            Merchant
+          </h1>
+          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-yellow-900 to-transparent mx-auto mb-8"></div>
+
+          <p className="text-gray-400 mb-8 font-serif italic text-lg">
+             Souls: <span className="text-yellow-600 font-bold">{score}</span>
+          </p>
+          
+          {/* Shop Items Grid */}
+          <div className="border border-gray-800 bg-black/50 p-6 w-full mb-8 min-h-[120px] flex items-center justify-center relative">
+             <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-gray-700"></div>
+             <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-gray-700"></div>
+             <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-gray-700"></div>
+             <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-gray-700"></div>
+             
+             {/* Estus Flask Item */}
+             <div className="flex flex-col items-center p-4 border border-gray-800 hover:border-orange-900/50 bg-gray-900/30 transition-colors w-32">
+                {/* Visual Flask */}
+                <div className="w-8 h-10 bg-gray-800 rounded-b-xl border-2 border-gray-600 relative overflow-hidden mb-2 shadow-[0_0_10px_rgba(255,165,0,0.2)]">
+                    <div className="absolute top-0 w-full h-1 bg-gray-700"></div>
+                    <div className="absolute bottom-0 w-full h-3/4 bg-gradient-to-t from-orange-600 to-yellow-500 animate-pulse opacity-90"></div>
+                    <div className="absolute top-1/2 left-1/2 w-4 h-4 bg-orange-300 rounded-full blur-md opacity-50 transform -translate-x-1/2 -translate-y-1/2"></div>
+                </div>
+                
+                <div className="text-orange-400 font-serif text-xs mb-1">Эстус</div>
+                <div className="text-gray-500 text-[10px] mb-2 text-center leading-tight">Heal 1 HP (3 charges)</div>
+                
+                {estusUnlocked ? (
+                    <div className="text-[10px] text-green-600 font-bold uppercase tracking-widest">Owned</div>
+                ) : (
+                    <button 
+                        onClick={() => setEstusUnlocked(true)}
+                        className="text-[10px] bg-gray-800 hover:bg-orange-900 text-gray-300 px-2 py-1 border border-gray-600"
+                    >
+                        Buy (0)
+                    </button>
+                )}
+             </div>
+          </div>
+
+          <button
+            onClick={() => setGameState(isGameInProgress ? GameState.PLAYING : GameState.MENU)}
+            className="group relative px-10 py-3 bg-transparent hover:bg-gray-900 text-gray-400 font-serif text-sm border border-gray-800 hover:border-gray-500 transition-all duration-300 w-full max-w-xs"
+          >
+             <span className="absolute inset-0 w-full h-full bg-gray-800/10 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left"></span>
+             <span className="relative tracking-widest uppercase">Leave</span>
+          </button>
         </div>
       )}
 

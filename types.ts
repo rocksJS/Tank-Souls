@@ -46,6 +46,7 @@ export interface Bullet extends Entity {
   active: boolean;
   vx?: number; // Velocity X for free-angle movement
   vy?: number; // Velocity Y for free-angle movement
+  variant?: 'standard' | 'glasscannon'; // New variant for special attacks
 }
 
 export interface Explosion extends Position {
@@ -61,4 +62,5 @@ export enum GameState {
   PLAYING = 'PLAYING',
   GAME_OVER = 'GAME_OVER',
   VICTORY = 'VICTORY',
+  SHOP = 'SHOP',
 }

@@ -6,9 +6,11 @@ interface SidebarProps {
   score: number;
   level: number;
   setGameState: (state: GameState) => void;
+  estusUnlocked: boolean;
+  estusCharges: number;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameState }) => {
+const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameState, estusUnlocked, estusCharges }) => {
   return (
     <div className="h-full bg-[#1a1a1a] p-4 flex flex-col items-center font-mono border-l-4 border-[#333] min-w-[200px]">
       
@@ -40,6 +42,21 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameSta
         </div>
       </div>
 
+      {/* Estus Flask HUD */}
+      {estusUnlocked && (
+          <div className="mb-8 text-gray-400 font-bold text-xl flex flex-col items-start w-full px-4">
+            <div className="flex items-center mb-2">
+                <span className="mr-2 text-xs text-orange-400">ESTUS [R]</span>
+            </div>
+            <div className="flex items-center">
+                <div className="w-4 h-6 mr-3 bg-gray-800 rounded-b-md border border-gray-500 relative overflow-hidden">
+                    <div className="absolute bottom-0 w-full bg-orange-500 transition-all duration-300" style={{ height: `${(estusCharges / 3) * 100}%` }}></div>
+                </div>
+                <span>{estusCharges}</span>
+            </div>
+          </div>
+      )}
+
       {/* Stage Number */}
       <div className="mb-auto text-gray-400 font-bold text-xl flex flex-col items-start w-full px-4">
          <div className="w-8 h-8 mb-2">
@@ -63,6 +80,13 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameSta
             className="w-full py-2 bg-[#333] hover:bg-[#444] text-gray-300 text-[10px] uppercase font-bold tracking-wider rounded border border-[#555] transition-colors"
           >
             Main Menu
+          </button>
+          
+          <button 
+            onClick={() => setGameState(GameState.SHOP)}
+            className="w-full py-2 mt-2 bg-[#1a1a1a] hover:bg-[#2a2a2a] text-yellow-600/80 text-[10px] uppercase font-bold tracking-wider rounded border border-yellow-900/30 hover:border-yellow-600/50 transition-colors"
+          >
+            Магазин
           </button>
       </div>
 

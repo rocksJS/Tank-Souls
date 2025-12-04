@@ -14,15 +14,22 @@ export const TANK_SIZE = 28;
 export const BULLET_SIZE = 4;
 export const SHOOT_COOLDOWN = 30; 
 
+// Player Constants
+export const PLAYER_MAX_HP = 3;
+
 // Boss Constants
 export const BOSS_SIZE = 48; // Bigger tank
 export const BOSS_HP = 30;
 export const BOSS_SPEED = 0.45; // Increased by 20% (0.375 * 1.2)
 export const BOSS_SHOOT_COOLDOWN = 80; // Increased fire rate by another 50% (120 / 1.5)
-export const BOSS_BULLET_SPEED = 1.45; // Increased by ~30% (1.1 * 1.3)
+// Updated: Boss bullet speed equals Player movement speed
+export const BOSS_BULLET_SPEED = PLAYER_SPEED; 
 
-// Player Constants
-export const PLAYER_MAX_HP = 3;
+// Boss Phase 2 - Glasscannon Ability
+export const GLASSCANNON_COOLDOWN = 12 * 60; // 12 seconds * 60 FPS
+export const GLASSCANNON_SIZE = BULLET_SIZE * 3;
+export const GLASSCANNON_SPEED_FACTOR = 0.5; // 50% of owner's bullet speed
+export const BOSS_RAGE_SPEED_MULT = 3.0; // 3x speed in rage mode dashes
 
 // Level 1: Standard layout (Extended height)
 const LEVEL_1 = [

@@ -20,6 +20,10 @@ import {
   BOSS_SPEED,
   BOSS_SHOOT_COOLDOWN,
   BOSS_BULLET_SPEED,
+  GLASSCANNON_COOLDOWN,
+  GLASSCANNON_SIZE,
+  GLASSCANNON_SPEED_FACTOR,
+  BOSS_RAGE_SPEED_MULT,
 } from '../constants';
 import {
   Direction,
@@ -38,9 +42,15 @@ interface GameCanvasProps {
   level: number;
   gameSessionId: number;
   onPlayerDeath: () => void;
+  estusUnlocked: boolean;
+  estusCharges: number;
+  setEstusCharges: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setScore, setEnemiesLeft, level, gameSessionId, onPlayerDeath }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ 
+    gameState, setGameState, setScore, setEnemiesLeft, level, gameSessionId, onPlayerDeath,
+    estusUnlocked, estusCharges, setEstusCharges
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Game State Refs
@@ -74,6 +84,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
   const enemySpawnTimerRef = useRef<number>(0);
   const enemiesToSpawnRef = useRef<number>(20);
   const bossSpawnedRef = useRef<boolean>(false);
+  const bossSpecialTimerRef = useRef<number>(0); // Timer for Glasscannon
+  
+  // Chaotic movement refs
+  const bossDashTimerRef = useRef<number>(0);
+  const bossDashVectorRef = useRef<{x: number, y: number}>({x: 0, y: 0});
+  
+  // Use a ref to track current charges inside the game loop to avoid stale closures,
+  // but we also need to update the parent state.
+  const estusChargesRef = useRef<number>(estusCharges);
+  
+  // Sync ref with prop
+  useEffect(() => {
+    estusChargesRef.current = estusCharges;
+  }, [estusCharges]);
 
   // Helper: Reset Game
   const resetGame = useCallback(() => {
@@ -142,6 +166,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
     enemiesToSpawnRef.current = level === 2 ? 0 : 20; 
     moveKeysRef.current = [];
     setScore(0);
+    bossSpecialTimerRef.current = 0;
+    bossDashTimerRef.current = 0;
+    bossDashVectorRef.current = {x: 0, y: 0};
 
     // Spawn Boss Immediately for Level 2
     if (level === 2) {
@@ -180,6 +207,32 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
              moveKeysRef.current.push(e.code);
          }
       }
+
+      // Estus Healing Logic
+      if (e.code === 'KeyR' && gameState === GameState.PLAYING) {
+         if (estusUnlocked && estusChargesRef.current > 0) {
+             const player = playerRef.current;
+             if (!player.isDead && player.hp < player.maxHp) {
+                 player.hp += 1;
+                 setEstusCharges(prev => prev - 1); // Update parent state
+                 estusChargesRef.current -= 1; // Update local ref immediately for debounce consistency if needed
+                 
+                 // Add heal visual effect
+                 explosionsRef.current.push({ 
+                    x: player.x, 
+                    y: player.y, 
+                    id: Math.random().toString(), 
+                    stage: 20, // Reuse stage for duration
+                    active: true 
+                    // We'll hijack the explosion drawing to check for special ID or just draw differently based on context
+                 });
+                 // Hack: We can add a property to explosion type, but to minimize file changes, 
+                 // we will assume stage > 10 is a heal effect for now in the draw loop, 
+                 // or we can just use the standard explosion array with a property we add dynamically
+                 (explosionsRef.current[explosionsRef.current.length-1] as any).type = 'heal';
+             }
+         }
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       keysRef.current[e.code] = false;
@@ -191,7 +244,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [estusUnlocked, gameState, setEstusCharges]);
 
   // Utility: AABB Collision
   const checkRectCollision = (r1: { x: number; y: number; width: number; height: number }, r2: { x: number; y: number; width: number; height: number }) => {
@@ -340,6 +393,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
                 owner: 'player',
                 active: true,
                 id: Math.random().toString(),
+                variant: 'standard',
             });
             player.cooldown = SHOOT_COOLDOWN;
         }
@@ -379,29 +433,113 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
     enemiesRef.current.forEach(enemy => {
         // Boss Logic
         if (enemy.type === 'boss') {
-            // Move slowly towards player
-            if (!player.isDead) {
-                const centerX = enemy.x + enemy.width / 2;
-                const centerY = enemy.y + enemy.height / 2;
-                const pCenterX = player.x + player.width / 2;
-                const pCenterY = player.y + player.height / 2;
-                
-                // Horizontal Approach
-                if (Math.abs(centerX - pCenterX) > 10) {
-                     const dx = pCenterX > centerX ? enemy.speed : -enemy.speed;
-                     if (!checkMapCollision({...enemy, x: enemy.x + dx})) {
-                         enemy.x += dx;
-                         enemy.direction = dx > 0 ? Direction.RIGHT : Direction.LEFT;
+            const isEnraged = enemy.hp <= enemy.maxHp / 2;
+            
+            // Phase 2 Logic (Glasscannon + Chaotic Movement)
+            if (isEnraged) {
+                 // 1. Ability Logic
+                 bossSpecialTimerRef.current++;
+                 if (bossSpecialTimerRef.current >= GLASSCANNON_COOLDOWN) {
+                     // Fire Glasscannon
+                     const eCx = enemy.x + enemy.width / 2;
+                     const eCy = enemy.y + enemy.height / 2;
+                     const pCx = player.x + player.width / 2;
+                     const pCy = player.y + player.height / 2;
+                     
+                     // Initial vector towards player
+                     const angle = Math.atan2(pCy - eCy, pCx - eCx);
+                     
+                     bulletsRef.current.push({
+                        x: eCx - GLASSCANNON_SIZE / 2, // Larger hitbox
+                        y: eCy - GLASSCANNON_SIZE / 2,
+                        width: GLASSCANNON_SIZE, // Use width as length for collision approx, but draw as spear
+                        height: GLASSCANNON_SIZE / 3, // Thinner width
+                        direction: Direction.DOWN, // Irrelevant for free movement
+                        speed: BOSS_BULLET_SPEED * GLASSCANNON_SPEED_FACTOR, 
+                        owner: 'boss',
+                        active: true,
+                        id: Math.random().toString(),
+                        vx: Math.cos(angle) * (BOSS_BULLET_SPEED * GLASSCANNON_SPEED_FACTOR),
+                        vy: Math.sin(angle) * (BOSS_BULLET_SPEED * GLASSCANNON_SPEED_FACTOR),
+                        variant: 'glasscannon'
+                    });
+                    
+                    bossSpecialTimerRef.current = 0;
+                 }
+
+                 // 2. Chaotic Movement Logic (Dashes)
+                 bossDashTimerRef.current--;
+                 if (bossDashTimerRef.current <= 0) {
+                     // Reset Dash Timer (Short unpredictable bursts)
+                     bossDashTimerRef.current = 20 + Math.random() * 30; // 20-50 frames
+
+                     if (!player.isDead) {
+                        const centerX = enemy.x + enemy.width / 2;
+                        const centerY = enemy.y + enemy.height / 2;
+                        const pCenterX = player.x + player.width / 2;
+                        const pCenterY = player.y + player.height / 2;
+                        
+                        // Calculate angle to player
+                        let angle = Math.atan2(pCenterY - centerY, pCenterX - centerX);
+                        
+                        // Add Chaos (Random Noise between -60 and +60 degrees)
+                        const noise = (Math.random() - 0.5) * (Math.PI / 1.5); 
+                        angle += noise;
+
+                        // Burst Speed
+                        const dashSpeed = enemy.speed * BOSS_RAGE_SPEED_MULT;
+                        bossDashVectorRef.current = {
+                            x: Math.cos(angle) * dashSpeed,
+                            y: Math.sin(angle) * dashSpeed
+                        };
+
+                        // Visual Direction Update based on dominant axis
+                        if (Math.abs(bossDashVectorRef.current.x) > Math.abs(bossDashVectorRef.current.y)) {
+                            enemy.direction = bossDashVectorRef.current.x > 0 ? Direction.RIGHT : Direction.LEFT;
+                        } else {
+                            enemy.direction = bossDashVectorRef.current.y > 0 ? Direction.DOWN : Direction.UP;
+                        }
                      }
-                }
-                // Vertical Approach
-                if (Math.abs(centerY - pCenterY) > 10) {
-                     const dy = pCenterY > centerY ? enemy.speed : -enemy.speed;
-                     if (!checkMapCollision({...enemy, y: enemy.y + dy})) {
-                         enemy.y += dy;
-                         // Bias visual direction to vertical if moving vertically
-                         enemy.direction = dy > 0 ? Direction.DOWN : Direction.UP;
-                     }
+                 }
+
+                 // Apply Chaotic Vector Movement with sliding
+                 const vx = bossDashVectorRef.current.x;
+                 const vy = bossDashVectorRef.current.y;
+                 
+                 // Try X
+                 if (!checkMapCollision({...enemy, x: enemy.x + vx})) {
+                     enemy.x += vx;
+                 }
+                 // Try Y
+                 if (!checkMapCollision({...enemy, y: enemy.y + vy})) {
+                     enemy.y += vy;
+                 }
+
+            } else {
+                // PHASE 1: Normal Slow Tracking
+                if (!player.isDead) {
+                    const centerX = enemy.x + enemy.width / 2;
+                    const centerY = enemy.y + enemy.height / 2;
+                    const pCenterX = player.x + player.width / 2;
+                    const pCenterY = player.y + player.height / 2;
+                    
+                    // Horizontal Approach
+                    if (Math.abs(centerX - pCenterX) > 10) {
+                         const dx = pCenterX > centerX ? enemy.speed : -enemy.speed;
+                         if (!checkMapCollision({...enemy, x: enemy.x + dx})) {
+                             enemy.x += dx;
+                             enemy.direction = dx > 0 ? Direction.RIGHT : Direction.LEFT;
+                         }
+                    }
+                    // Vertical Approach
+                    if (Math.abs(centerY - pCenterY) > 10) {
+                         const dy = pCenterY > centerY ? enemy.speed : -enemy.speed;
+                         if (!checkMapCollision({...enemy, y: enemy.y + dy})) {
+                             enemy.y += dy;
+                             // Bias visual direction to vertical if moving vertically
+                             enemy.direction = dy > 0 ? Direction.DOWN : Direction.UP;
+                         }
+                    }
                 }
             }
 
@@ -450,7 +588,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
                         active: true,
                         id: Math.random().toString(),
                         vx: Math.cos(angle) * BOSS_BULLET_SPEED,
-                        vy: Math.sin(angle) * BOSS_BULLET_SPEED
+                        vy: Math.sin(angle) * BOSS_BULLET_SPEED,
+                        variant: 'standard'
                     });
                 });
                 
@@ -496,6 +635,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
                     owner: 'enemy',
                     active: true,
                     id: Math.random().toString(),
+                    variant: 'standard'
                 });
                 enemy.cooldown = SHOOT_COOLDOWN * 2;
             }
@@ -508,6 +648,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
             const b1 = bulletsRef.current[i];
             const b2 = bulletsRef.current[j];
             
+            // Glasscannon ignores bullet collision (unstopabble)
+            if (b1.variant === 'glasscannon' || b2.variant === 'glasscannon') continue;
+
             if (b1.active && b2.active && b1.owner !== b2.owner && checkRectCollision(b1, b2)) {
                 b1.active = false;
                 b2.active = false;
@@ -523,7 +666,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
         if (!b.active) return;
         
         // Handle vector movement or direction movement
-        if (b.vx !== undefined && b.vy !== undefined) {
+        if (b.variant === 'glasscannon') {
+            // Homing logic: Update velocity to point towards player
+             if (!player.isDead) {
+                const bCx = b.x + b.width/2;
+                const bCy = b.y + b.height/2;
+                const pCx = player.x + player.width/2;
+                const pCy = player.y + player.height/2;
+                const angle = Math.atan2(pCy - bCy, pCx - bCx);
+                b.vx = Math.cos(angle) * b.speed;
+                b.vy = Math.sin(angle) * b.speed;
+             }
+             // Apply movement
+             if (b.vx !== undefined && b.vy !== undefined) {
+                 b.x += b.vx;
+                 b.y += b.vy;
+             }
+        } else if (b.vx !== undefined && b.vy !== undefined) {
             b.x += b.vx;
             b.y += b.vy;
         } else {
@@ -546,6 +705,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
         if (b.active) {
             if (b.owner === 'player') {
                 enemiesRef.current.forEach(e => {
+                    // Larger collision box for glasscannon hit check against boss? No, glasscannon is boss bullet.
+                    // Check if player bullet hit enemy
                     if (checkRectCollision(b, e)) {
                         b.active = false;
                         e.hp -= 1;
@@ -743,26 +904,71 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
     // Draw Enemies (including Boss, but without health bar above)
     enemiesRef.current.forEach(e => {
         if (e.type === 'boss') {
-            drawTank(e, COLORS.BOSS, COLORS.BOSS_DETAIL);
+            const isEnraged = e.hp <= e.maxHp / 2;
+            const mainColor = isEnraged ? '#FF4500' : COLORS.BOSS; // Brighter red/orange when enraged
+            const detailColor = isEnraged ? '#FFFF00' : COLORS.BOSS_DETAIL;
+            drawTank(e, mainColor, detailColor);
         } else {
             drawTank(e, COLORS.ENEMY);
         }
     });
 
-    ctx.fillStyle = COLORS.BULLET;
     bulletsRef.current.forEach(b => {
-        ctx.beginPath();
-        ctx.fillRect(b.x, b.y, b.width, b.height);
+        if (b.variant === 'glasscannon') {
+            // Draw Spear
+            ctx.fillStyle = '#FF0000'; // Red
+            
+            // Calculate rotation for drawing
+            const angle = Math.atan2(b.vy || 0, b.vx || 0);
+            const cx = b.x + b.width / 2;
+            const cy = b.y + b.height / 2;
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(angle);
+            
+            // Draw Spear Shape (Triangular/Long) relative to center
+            const length = b.width; // 12
+            const width = b.height; // 4
+            
+            ctx.beginPath();
+            // Arrowhead/Spear tip
+            ctx.moveTo(length/2, 0); 
+            ctx.lineTo(-length/2, -width/2);
+            ctx.lineTo(-length/2 + 2, 0); // Indent
+            ctx.lineTo(-length/2, width/2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Glow effect
+            ctx.shadowColor = '#FF0000';
+            ctx.shadowBlur = 10;
+            ctx.stroke();
+
+            ctx.restore();
+            
+        } else {
+            ctx.fillStyle = COLORS.BULLET;
+            ctx.beginPath();
+            ctx.fillRect(b.x, b.y, b.width, b.height);
+        }
     });
 
     explosionsRef.current.forEach(e => {
-        ctx.fillStyle = `rgba(255, 69, 0, ${e.stage / 10})`;
-        const center = { x: e.x + 14, y: e.y + 14 };
-        const size = (10 - e.stage) * 4;
-        ctx.fillRect(center.x - size/2, center.y - size/2, size, size);
-        ctx.fillStyle = `rgba(255, 255, 0, ${e.stage / 10})`;
-        const innerSize = size / 2;
-        ctx.fillRect(center.x - innerSize/2, center.y - innerSize/2, innerSize, innerSize);
+        if ((e as any).type === 'heal') {
+            // Draw healing text
+            ctx.fillStyle = '#00FF00'; // Green
+            ctx.font = "12px 'Press Start 2P'";
+            ctx.fillText("HEAL", e.x, e.y - (20 - e.stage));
+        } else {
+            ctx.fillStyle = `rgba(255, 69, 0, ${e.stage / 10})`;
+            const center = { x: e.x + 14, y: e.y + 14 };
+            const size = (10 - e.stage) * 4;
+            ctx.fillRect(center.x - size/2, center.y - size/2, size, size);
+            ctx.fillStyle = `rgba(255, 255, 0, ${e.stage / 10})`;
+            const innerSize = size / 2;
+            ctx.fillRect(center.x - innerSize/2, center.y - innerSize/2, innerSize, innerSize);
+        }
     });
 
     for (let y = 0; y < GRID_HEIGHT; y++) {
@@ -784,6 +990,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
         const barHeight = 16;
         const barX = (CANVAS_WIDTH - barWidth) / 2;
         const barY = 30; // Top of screen
+        const isEnraged = boss.hp <= boss.maxHp / 2;
 
         // Boss Name
         ctx.fillStyle = '#FFF';
@@ -797,8 +1004,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
         
         // Health
         const hpPercent = boss.hp / boss.maxHp;
-        ctx.fillStyle = '#ff0000';
+        
+        if (isEnraged) {
+            // Pulse logic for fire effect
+            const time = Date.now();
+            const pulse = Math.abs(Math.sin(time / 200)); // 0 to 1
+            const r = 255;
+            const g = Math.floor(pulse * 150); // 0 to 150
+            const b = 0;
+            
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            
+            // Fire Glow
+            ctx.shadowColor = `rgb(255, ${Math.floor(pulse * 100)}, 0)`;
+            ctx.shadowBlur = 10 + pulse * 10;
+        } else {
+            ctx.fillStyle = '#ff0000';
+            ctx.shadowBlur = 0;
+        }
+
         ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+        ctx.shadowBlur = 0; // Reset shadow for border
         
         // Border
         ctx.strokeStyle = '#AAA';
