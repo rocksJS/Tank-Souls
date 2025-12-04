@@ -3,6 +3,7 @@ import { GameState } from '../types';
 
 interface UIOverlayProps {
   gameState: GameState;
+  setGameState: (state: GameState) => void;
   score: number;
   enemiesLeft: number;
   startGame: () => void;
@@ -11,106 +12,110 @@ interface UIOverlayProps {
   unlockedLevel: number;
 }
 
-const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, score, enemiesLeft, startGame, level, setLevel, unlockedLevel }) => {
+const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, enemiesLeft, startGame, level, setLevel, unlockedLevel }) => {
   return (
-    <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col items-center justify-center">
-      {/* HUD Removed - moved to Sidebar */}
-
-      {/* Main Menu */}
+    <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col items-center justify-center font-serif">
+      
+      {/* Main Menu - Tank Souls Style */}
       {gameState === GameState.MENU && (
-        <div className="bg-black bg-opacity-90 p-10 border-4 border-yellow-500 rounded-lg text-center pointer-events-auto shadow-[0_0_20px_rgba(255,215,0,0.5)] z-20">
-          <h1 className="text-4xl md:text-6xl text-red-500 font-bold mb-4 drop-shadow-lg tracking-widest uppercase">
-            BATTLE CITY
+        <div className="bg-black/95 p-12 border border-gray-700 shadow-[0_0_60px_rgba(0,0,0,0.9)] text-center pointer-events-auto max-w-lg w-full relative overflow-hidden">
+          {/* Decorative Corner Borders */}
+          <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-gray-500"></div>
+          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-gray-500"></div>
+          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-gray-500"></div>
+          <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-gray-500"></div>
+
+          <h1 className="text-6xl md:text-7xl text-gray-200 mb-2 drop-shadow-lg tracking-widest font-gothic">
+            Tank Souls
           </h1>
-          <p className="text-gray-400 mb-8 text-sm">REACT EDITION</p>
+          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-gray-500 to-transparent mx-auto mb-8"></div>
+          
+          <p className="text-gray-500 mb-8 text-xs font-mono uppercase tracking-[0.3em]">The Darkest Tank Battle</p>
           
           {/* Level Selector */}
-          <div className="mb-6 flex gap-4 justify-center">
+          <div className="mb-10 flex gap-6 justify-center">
              <button 
                 onClick={() => setLevel(1)}
-                className={`px-4 py-2 border-2 ${level === 1 ? 'border-yellow-400 text-yellow-400' : 'border-gray-600 text-gray-500'} font-mono text-sm uppercase`}
+                className={`text-lg transition-all duration-300 ${level === 1 ? 'text-gray-100 border-b border-gray-100' : 'text-gray-600 hover:text-gray-400'}`}
              >
-                Level 1
+                I
              </button>
              <button 
                 onClick={() => unlockedLevel >= 2 && setLevel(2)}
                 disabled={unlockedLevel < 2}
-                className={`px-4 py-2 border-2 ${
-                    level === 2 ? 'border-yellow-400 text-yellow-400' : 
-                    unlockedLevel >= 2 ? 'border-gray-600 text-gray-500 hover:text-white hover:border-white' : 'border-gray-800 text-gray-800 cursor-not-allowed'
-                } font-mono text-sm uppercase relative`}
+                className={`text-lg transition-all duration-300 relative ${
+                    level === 2 ? 'text-gray-100 border-b border-gray-100' : 
+                    unlockedLevel >= 2 ? 'text-gray-600 hover:text-gray-400' : 'text-gray-800 cursor-not-allowed'
+                }`}
              >
-                Level 2
+                II
                 {unlockedLevel < 2 && (
-                    <span className="absolute -top-3 -right-3 text-xs bg-red-600 text-white px-1 rounded">LOCK</span>
+                    <span className="absolute -top-2 -right-3 text-[10px] text-red-900 font-bold">×</span>
                 )}
              </button>
           </div>
 
           <button
             onClick={startGame}
-            className="px-8 py-4 bg-yellow-600 hover:bg-yellow-500 text-white font-bold text-xl rounded transition transform hover:scale-105 border-b-4 border-yellow-800 active:border-b-0 active:mt-1"
+            className="group relative px-10 py-3 bg-transparent hover:bg-gray-900 text-gray-300 font-serif text-xl border border-gray-600 hover:border-gray-400 transition-all duration-500 ease-in-out"
           >
-            START GAME
+            <span className="absolute inset-0 w-full h-full bg-gray-800/20 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left"></span>
+            <span className="relative tracking-widest uppercase">Begin Journey</span>
           </button>
-          <div className="mt-6 text-gray-500 text-xs font-mono">
-            <p>WASD / ARROWS to Move</p>
-            <p>SPACE to Shoot</p>
-          </div>
         </div>
       )}
 
-      {/* Game Over */}
+      {/* Game Over - Souls Style */}
       {gameState === GameState.GAME_OVER && (
-        <div className="bg-red-900 bg-opacity-90 p-10 border-4 border-white rounded-lg text-center pointer-events-auto animate-bounce z-20">
-          <h2 className="text-5xl text-white font-bold mb-6 uppercase">GAME OVER</h2>
-          <p className="text-yellow-300 text-xl mb-6">FINAL SCORE: {score}</p>
+        <div className="bg-black/80 w-full h-full flex flex-col items-center justify-center pointer-events-auto animate-in fade-in duration-1000">
+          <h2 className="text-6xl md:text-8xl text-red-900 font-serif tracking-widest mb-4 uppercase drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)] scale-y-110">
+            YOU DIED
+          </h2>
+          <div className="w-full h-px bg-gradient-to-r from-transparent via-red-900 to-transparent mb-8 opacity-50"></div>
+          <p className="text-gray-500 text-lg mb-8 font-serif">Soul Memory: {score}</p>
           <button
             onClick={startGame}
-            className="px-6 py-3 bg-white text-red-900 font-bold text-lg rounded hover:bg-gray-200 transition"
+            className="px-8 py-2 text-gray-400 hover:text-white hover:bg-white/5 border-t border-b border-transparent hover:border-gray-600 transition-all duration-300 font-serif tracking-widest uppercase text-sm"
           >
-            TRY AGAIN
+            Try Again
           </button>
+          <button
+             onClick={() => setGameState(GameState.MENU)}
+             className="mt-4 px-8 py-2 text-gray-600 hover:text-gray-400 font-serif tracking-widest uppercase text-xs"
+           >
+             Return to Menu
+           </button>
         </div>
       )}
 
-      {/* Victory */}
+      {/* Victory - Souls Style */}
       {gameState === GameState.VICTORY && (
-        <div className="bg-green-900 bg-opacity-90 p-10 border-4 border-white rounded-lg text-center pointer-events-auto z-20">
-          <h2 className="text-5xl text-white font-bold mb-6 uppercase">VICTORY</h2>
-          <p className="text-yellow-300 text-xl mb-6">STAGE {level} CLEARED</p>
-          <button
-            onClick={() => {
-                // If there is a next level unlocked, maybe switch to it?
-                // For now, just reset to menu creates a loop
-                // Or startGame again for replay
-                // Let's go to menu to choose next level
-                const event = new KeyboardEvent('keydown', { code: 'Escape' }); 
-                // Hacky way? No, just call a prop or reload window?
-                // Let's just create a "Return to Menu" logic if we had one, but startGame restarts current level usually
-                // In classic NES, it goes to next level automatically.
-                // For this request, "Select levels" implies going back to menu or simple restart.
-                // We'll rename the button to NEXT or MENU
-                window.location.reload(); // Simple refresh for now to reset app state properly or we need a setGameState(MENU)
-            }}
-            className="px-6 py-3 bg-white text-green-900 font-bold text-lg rounded hover:bg-gray-200 transition hidden"
-          >
-            PLAY AGAIN
-          </button>
+        <div className="bg-black/80 w-full h-full flex flex-col items-center justify-center pointer-events-auto animate-in fade-in duration-1000">
+          <h2 className="text-5xl md:text-7xl text-yellow-600/80 font-serif tracking-widest mb-4 uppercase drop-shadow-lg font-light">
+            VICTORY ACHIEVED
+          </h2>
+          <div className="w-64 h-px bg-yellow-900/50 mb-8"></div>
           
-           <div className="flex gap-4 justify-center">
+          <div className="flex flex-col gap-4 items-center">
+             {level < 2 ? (
+                <button
+                    onClick={() => {
+                        setLevel(level + 1);
+                        startGame();
+                    }}
+                    className="px-10 py-3 bg-gray-900 hover:bg-gray-800 text-yellow-500/80 border border-gray-800 hover:border-yellow-900/50 transition-all duration-300 font-serif text-lg tracking-widest uppercase shadow-lg"
+                >
+                    Next Level
+                </button>
+             ) : (
+                <div className="text-gray-400 font-serif italic mb-2">Journey Complete</div>
+             )}
+             
              <button
-               onClick={startGame}
-               className="px-6 py-3 bg-white text-green-900 font-bold text-lg rounded hover:bg-gray-200 transition"
+               onClick={() => setGameState(GameState.MENU)}
+               className="px-8 py-2 text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all duration-300 font-serif tracking-widest uppercase text-sm"
              >
-               REPLAY
-             </button>
-             {/* If we just unlocked level 2, show button to go to menu */}
-             <button
-               onClick={() => window.location.reload()}
-               className="px-6 py-3 bg-gray-200 text-gray-900 font-bold text-lg rounded hover:bg-white transition"
-             >
-               MENU
+               Return to Menu
              </button>
            </div>
         </div>

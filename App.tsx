@@ -28,11 +28,11 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
       <div className="relative">
-        <div className="relative border-[20px] border-neutral-800 rounded-xl shadow-2xl bg-[#636363] flex">
-             {/* TV Scanline effect */}
-             <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-30 pointer-events-none bg-[length:100%_4px,3px_100%] rounded-lg"></div>
+        <div className="relative border-[4px] border-[#333] rounded shadow-[0_0_50px_rgba(0,0,0,0.8)] bg-[#1a1a1a] flex">
+             {/* TV Scanline effect (subtler for Tank Souls) */}
+             <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(0,0,0,0.03),rgba(0,0,0,0.03))] z-30 pointer-events-none bg-[length:100%_4px,3px_100%] rounded-lg"></div>
              
              <div className="relative">
                  <GameCanvas 
@@ -44,6 +44,7 @@ const App: React.FC = () => {
                  />
                  <UIOverlay 
                     gameState={gameState} 
+                    setGameState={setGameState}
                     score={score} 
                     enemiesLeft={enemiesLeft}
                     startGame={startGame}
@@ -56,10 +57,9 @@ const App: React.FC = () => {
              <Sidebar enemiesLeft={enemiesLeft} score={score} level={level} />
         </div>
         
-        {/* Decorative TV details */}
-        <div className="absolute -bottom-16 left-0 w-full flex justify-between px-8 text-neutral-600 font-mono text-xs">
-             <div>POWER <span className="inline-block w-2 h-2 bg-red-500 rounded-full ml-1 animate-pulse"></span></div>
-             <div>REACT-NES-SYSTEM</div>
+        {/* Decorative details */}
+        <div className="absolute -bottom-12 left-0 w-full flex justify-center text-[#444] font-gothic text-xl opacity-50">
+             PREPARE TO DIE EDITION
         </div>
       </div>
     </div>
