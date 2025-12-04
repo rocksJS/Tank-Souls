@@ -27,8 +27,10 @@ export const BOSS_BULLET_SPEED = PLAYER_SPEED;
 
 // Sally Boss (Level 3) - Formerly Prophet
 export const SALLY_SIZE = TANK_SIZE * 3.5; // ~98
-export const SALLY_HP = 60;
+export const SALLY_HP = 30; // REDUCED BY 50% (was 60)
 export const SALLY_SPEED = 0.5;
+export const SALLY_BULLET_SPEED = BOSS_BULLET_SPEED * 0.85; // Reduced by 15%
+export const SALLY_SNAKE_BULLET_SPEED = SALLY_BULLET_SPEED * 0.5; // 50% of normal bullet
 
 // Boss Phase 2 - Glasscannon Ability
 export const GLASSCANNON_COOLDOWN = 12 * 60; // 12 seconds * 60 FPS
@@ -37,8 +39,11 @@ export const GLASSCANNON_SPEED_FACTOR = 0.5; // 50% of owner's bullet speed
 export const BOSS_RAGE_SPEED_MULT = 3.0; // 3x speed in rage mode dashes
 
 // Sally Mechanics
-export const SALLY_PETRIFY_DURATION = 480; // 8 seconds (60fps)
+export const SALLY_AWAKEN_DURATION = 240; // 4 seconds (60fps)
+export const SALLY_PETRIFY_DURATION = 480; // 8 seconds (60fps) - Phase 2
 export const SALLY_PHASE_4_BASE_SPEED = 4.0;
+export const SALLY_BACKSTAB_DURATION = 300; // 5 seconds stun (was 120/2s)
+export const SALLY_BACKSTAB_COOLDOWN = 600; // 10 seconds cooldown (5s stun + 5s immunity)
 
 // Sally Laser Ability
 export const SALLY_LASER_COOLDOWN = 180; // 3 seconds between cycles
@@ -50,7 +55,13 @@ export const SALLY_LASER_TRACE_DURATION = 120; // 2 seconds
 
 // Sally Shotgun Ability
 export const SALLY_SHOTGUN_BURST_DELAY = 12; // 0.2 seconds between bursts
-export const SALLY_SHOTGUN_BULLET_COUNT = 20;
+export const SALLY_SHOTGUN_BULLET_COUNT = 15; // REDUCED BY 25% (was 20)
+
+// Sally Phase 2 Moon Disc
+export const SALLY_MOON_DISC_SPEED = 2.1; // Reduced by 40% (was 3.5)
+export const SALLY_MOON_DISC_COOLDOWN = 90; // 1.5 seconds
+export const SALLY_MOON_DISC_SIZE = 8;
+export const SALLY_MOON_DISC_BOUNCES = 2; // Bounces 2 times then disappears
 
 export const COLORS = {
   BACKGROUND: '#000000',
@@ -111,13 +122,17 @@ const LEVEL_2 = [
     row(11), row(11), row(11), row(11),
     row(11), row(11), row(11), row(11),
     pillarRow(11, 2), pillarRow(11, 2),
-    row(11), row(11)
+    row(0), row(0) // Removed Fog from bottom 2 rows
 ];
 
-// Level 3: Sally Arena (Wide Open)
+// Level 3: Sally Arena (Filled with Fog for intro, except bottom)
 const LEVEL_3 = [];
 for(let y = 0; y < GRID_HEIGHT; y++) {
-  LEVEL_3.push(row(0));
+  if (y >= GRID_HEIGHT - 2) {
+      LEVEL_3.push(row(0)); // Removed Fog from bottom 2 rows
+  } else {
+      LEVEL_3.push(row(11)); // Filled with FOG (11)
+  }
 }
 
 export const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3];

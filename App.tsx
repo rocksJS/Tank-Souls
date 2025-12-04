@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import GameCanvas from './components/GameCanvas';
 import UIOverlay from './components/UIOverlay';
 import Sidebar from './components/Sidebar';
-import { GameState } from './types';
+import { GameState, Tank } from './types';
+import { PLAYER_MAX_HP } from './constants';
 
 const SAVE_KEY = 'tank_souls_save_data_v1';
 
@@ -31,6 +32,7 @@ const App: React.FC = () => {
   const [gameSessionId, setGameSessionId] = useState<number>(0);
   const [isGameInProgress, setIsGameInProgress] = useState<boolean>(false);
   const [deathCount, setDeathCount] = useState<number>(savedData?.deathCount ?? 0);
+  const [playerHp, setPlayerHp] = useState<number>(PLAYER_MAX_HP);
 
   // Shop Items State
   const [estusUnlocked, setEstusUnlocked] = useState<boolean>(savedData?.estusUnlocked ?? false);
@@ -69,6 +71,7 @@ const App: React.FC = () => {
     
     setEnemiesLeft(20);
     setIsGameInProgress(true);
+    setPlayerHp(PLAYER_MAX_HP);
     
     // Reset Estus charges on level start if unlocked
     if (estusUnlocked) {
@@ -84,6 +87,7 @@ const App: React.FC = () => {
 
   const handlePlayerDeath = () => {
       setDeathCount(prev => prev + 1);
+      setPlayerHp(0);
   };
 
   const resetProgress = () => {
@@ -120,6 +124,8 @@ const App: React.FC = () => {
                         estusUnlocked={estusUnlocked}
                         estusCharges={estusCharges}
                         setEstusCharges={setEstusCharges}
+                        infiniteEstus={boneUnlocked && unlockedLevel >= 3}
+                        setPlayerHp={setPlayerHp}
                      />
                      
                      {/* Fog Overlay for Menu Ambience - Persistent on all levels */}
@@ -168,6 +174,7 @@ const App: React.FC = () => {
                 score={score} 
                 level={level} 
                 setGameState={setGameState}
+                playerHp={playerHp}
              />
         </div>
         

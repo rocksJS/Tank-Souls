@@ -41,7 +41,7 @@ export interface Tank extends Entity {
   hp: number;
   maxHp: number;
   // Boss Intro Specifics
-  introState?: 'HIDDEN' | 'FALLING' | 'LANDING' | 'IDLE' | 'FIGHT' | 'DORMANT' | 'AWAKENING';
+  introState?: 'HIDDEN' | 'FALLING' | 'LANDING' | 'IDLE' | 'FIGHT' | 'DORMANT' | 'APPEARING' | 'AWAKENING' | 'WAITING_FOR_HIT';
   introOffsetY?: number; // For falling animation
   introTimer?: number;
   // Boss Mechanics
@@ -58,9 +58,18 @@ export interface Tank extends Entity {
   
   // Sally Phases
   phase?: 1 | 2 | 3 | 4;
-  petrifyTimer?: number; // Phase 2 Invulnerability
+  petrifyTimer?: number; // Phase 2 Invulnerability (Deprecated/Modified usage)
   vx?: number; // Phase 4 Physics X
   vy?: number; // Phase 4 Physics Y
+  
+  // New Sally Mechanics
+  stunTimer?: number; // General stun (Backstab)
+  backstabCooldown?: number; // Timer before she can be backstabbed again
+  snakeFireTimer?: number; // Timer for snake hair firing
+  moonDiscTimer?: number; // Timer for Phase 2 attack
+  
+  // Player Mechanics
+  invulnerabilityTimer?: number; // Frames of invincibility (0.5s = 30 frames)
 }
 
 export interface Bullet extends Entity {
@@ -68,14 +77,15 @@ export interface Bullet extends Entity {
   active: boolean;
   vx?: number; // Velocity X for free-angle movement
   vy?: number; // Velocity Y for free-angle movement
-  variant?: 'standard' | 'glasscannon'; // New variant for special attacks
+  variant?: 'standard' | 'glasscannon' | 'red_snake' | 'moon_disc'; // New variant for special attacks
+  bounceCount?: number; // For moon_disc
 }
 
 export interface Explosion extends Position {
   id: string;
   stage: number; // For animation
   active: boolean;
-  type?: 'standard' | 'heal' | 'smoke' | 'impact' | 'boss_aura' | 'glitch' | 'fire' | 'laser_trace';
+  type?: 'standard' | 'heal' | 'smoke' | 'impact' | 'boss_aura' | 'glitch' | 'fire' | 'laser_trace' | 'portal';
   vx?: number;
   vy?: number;
   color?: string;

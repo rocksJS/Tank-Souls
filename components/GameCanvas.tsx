@@ -27,6 +27,8 @@ import {
   SALLY_SIZE,
   SALLY_HP,
   SALLY_SPEED,
+  SALLY_BULLET_SPEED,
+  SALLY_SNAKE_BULLET_SPEED,
   SALLY_LASER_COOLDOWN,
   SALLY_PRE_CHARGE,
   SALLY_CHARGE,
@@ -36,7 +38,14 @@ import {
   SALLY_SHOTGUN_BURST_DELAY,
   SALLY_SHOTGUN_BULLET_COUNT,
   SALLY_PETRIFY_DURATION,
-  SALLY_PHASE_4_BASE_SPEED
+  SALLY_PHASE_4_BASE_SPEED,
+  SALLY_BACKSTAB_DURATION,
+  SALLY_BACKSTAB_COOLDOWN,
+  SALLY_AWAKEN_DURATION,
+  SALLY_MOON_DISC_SPEED,
+  SALLY_MOON_DISC_COOLDOWN,
+  SALLY_MOON_DISC_SIZE,
+  SALLY_MOON_DISC_BOUNCES
 } from '../constants';
 import {
   Direction,
@@ -58,11 +67,38 @@ interface GameCanvasProps {
   estusUnlocked: boolean;
   estusCharges: number;
   setEstusCharges: React.Dispatch<React.SetStateAction<number>>;
+  infiniteEstus: boolean;
+  setPlayerHp: React.Dispatch<React.SetStateAction<number>>;
 }
+
+// Color Utility
+const hexToRgb = (hex: string) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : { r: 0, g: 0, b: 0 };
+};
+
+const rgbToHex = (r: number, g: number, b: number) => {
+    return "#" + ((1 << 24) + (Math.round(r) << 16) + (Math.round(g) << 8) + Math.round(b)).toString(16).slice(1);
+};
+
+const blendColors = (c1: string, c2: string, t: number) => {
+    const rgb1 = hexToRgb(c1);
+    const rgb2 = hexToRgb(c2);
+    const r = rgb1.r + (rgb2.r - rgb1.r) * t;
+    const g = rgb1.g + (rgb2.g - rgb1.g) * t;
+    const b = rgb1.b + (rgb2.b - rgb1.b) * t;
+    return rgbToHex(r, g, b);
+};
+
+const SALLY_APPEAR_DURATION = 120; // 2 seconds for portal rise
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
     gameState, setGameState, setScore, setEnemiesLeft, level, gameSessionId, onPlayerDeath,
-    estusUnlocked, estusCharges, setEstusCharges
+    estusUnlocked, estusCharges, setEstusCharges, infiniteEstus, setPlayerHp
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -86,6 +122,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     isDead: false,
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
+    invulnerabilityTimer: 0
   });
   
   const enemiesRef = useRef<Tank[]>([]);
@@ -172,7 +209,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       isDead: false,
       hp: PLAYER_MAX_HP,
       maxHp: PLAYER_MAX_HP,
+      invulnerabilityTimer: 0
     };
+    // Sync UI HP
+    setPlayerHp(PLAYER_MAX_HP);
+
     enemiesRef.current = [];
     bulletsRef.current = [];
     explosionsRef.current = [];
@@ -215,7 +256,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     else if (level === 3) {
         enemiesRef.current.push({
             x: (GRID_WIDTH / 2) * TILE_SIZE - SALLY_SIZE / 2,
-            y: TILE_SIZE * 3, 
+            y: (GRID_HEIGHT / 2) * TILE_SIZE - SALLY_SIZE / 2, // Middle of screen
             width: SALLY_SIZE,
             height: SALLY_SIZE,
             direction: Direction.DOWN,
@@ -226,7 +267,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             isDead: false,
             hp: SALLY_HP,
             maxHp: SALLY_HP,
-            introState: 'FIGHT', 
+            introState: 'DORMANT', // Start dormant for intro animation
             introOffsetY: 0,
             introTimer: 0,
             defenseBuffTimer: 0,
@@ -234,7 +275,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             specialTimer: 0,
             aimAngle: 0,
             phase: 1,
-            petrifyTimer: 0
+            petrifyTimer: 0,
+            stunTimer: 0,
+            backstabCooldown: 0,
+            snakeFireTimer: 0,
+            moonDiscTimer: 0
         });
         bossSpawnedRef.current = true;
     }
@@ -242,7 +287,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         bossSpawnedRef.current = false;
     }
 
-  }, [setScore, level, setEnemiesLeft]);
+  }, [setScore, level, setEnemiesLeft, setPlayerHp]);
 
   useEffect(() => {
      resetGame();
@@ -259,24 +304,35 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
          }
       }
 
-      // Estus Healing Logic
-      if (e.code === 'KeyR' && gameState === GameState.PLAYING) {
-         if (estusUnlocked && estusChargesRef.current > 0) {
+      // Estus Healing Logic (Updated for Infinite Use if Unlocked and Bone Active)
+      if ((e.code === 'KeyR' || e.code === 'KeyE') && gameState === GameState.PLAYING) {
+         if (estusUnlocked) {
              const player = playerRef.current;
              if (!player.isDead && player.hp < player.maxHp) {
-                 player.hp += 1;
-                 setEstusCharges(prev => prev - 1); // Update parent state
-                 estusChargesRef.current -= 1; // Update local ref immediately for debounce consistency if needed
+                 let healed = false;
+                 if (infiniteEstus) {
+                     // Infinite mode: No charge usage
+                     player.hp += 1;
+                     healed = true;
+                 } else if (estusChargesRef.current > 0) {
+                     // Normal mode: Consume charge
+                     player.hp += 1;
+                     setEstusCharges(prev => prev - 1); 
+                     estusChargesRef.current -= 1; // Sync local ref immediately
+                     healed = true;
+                 }
                  
-                 // Add heal visual effect
-                 explosionsRef.current.push({ 
-                    x: player.x, 
-                    y: player.y, 
-                    id: Math.random().toString(), 
-                    stage: 20, // Reuse stage for duration
-                    active: true,
-                    type: 'heal'
-                 });
+                 if (healed) {
+                     setPlayerHp(player.hp); // Sync UI
+                     explosionsRef.current.push({ 
+                        x: player.x, 
+                        y: player.y, 
+                        id: Math.random().toString(), 
+                        stage: 20, 
+                        active: true, 
+                        type: 'heal'
+                     });
+                 }
              }
          }
       }
@@ -291,7 +347,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [estusUnlocked, gameState, setEstusCharges]);
+  }, [estusUnlocked, gameState, setEstusCharges, infiniteEstus, setPlayerHp]);
 
   // Utility: AABB Collision
   const checkRectCollision = (r1: { x: number; y: number; width: number; height: number }, r2: { x: number; y: number; width: number; height: number }) => {
@@ -485,8 +541,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // --- TRIGGER BOSS AWAKENING ---
         const boss = enemiesRef.current.find(e => e.type === 'boss');
         if (boss && boss.introState === 'DORMANT') {
-            boss.introState = 'AWAKENING';
-            boss.introTimer = 180; // 3 seconds of awakening
+            if (boss.id === 'SALLY') {
+                // Level 3: Immediate Fight
+                boss.introState = 'FIGHT';
+                // Explosion to announce appearance
+                explosionsRef.current.push({ 
+                    x: boss.x + boss.width/2, 
+                    y: boss.y + boss.height/2, 
+                    id: Math.random().toString(), 
+                    stage: 20, 
+                    active: true, 
+                    type: 'smoke' 
+                });
+            } else {
+                // Level 2 (Juggernaut): Immediate appear sequence
+                boss.introState = 'APPEARING';
+                boss.introTimer = SALLY_APPEAR_DURATION; 
+            }
         }
     }
   };
@@ -498,6 +569,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // --- Player Movement ---
     const player = playerRef.current;
     if (!player.isDead) {
+        // Decrease invulnerability timer
+        if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+            player.invulnerabilityTimer--;
+        }
+
         let dx = 0;
         let dy = 0;
         let moved = false;
@@ -591,9 +667,192 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     enemiesRef.current.forEach(enemy => {
         // Boss Logic
         if (enemy.type === 'boss') {
+
+            // --- BOSS INTRO LOGIC (Level 2 & 3) ---
+            if (level === 2 || level === 3) {
+                if (enemy.introState === 'DORMANT') {
+                    // Waiting for fog to clear, logic handled in checkFogOverlap
+                    return; 
+                }
+                
+                // --- SALLY APPEARING ANIMATION (Level 2 Only uses this, Level 3 skips to Waiting) ---
+                if (enemy.introState === 'APPEARING') {
+                    if (enemy.introTimer && enemy.introTimer > 0) {
+                        enemy.introTimer--;
+                    } else {
+                        enemy.introState = 'AWAKENING';
+                        enemy.introTimer = SALLY_AWAKEN_DURATION; 
+                    }
+                    return;
+                }
+
+                // --- AWAKENING ANIMATION ---
+                if (enemy.introState === 'AWAKENING') {
+                    if (enemy.introTimer && enemy.introTimer > 0) {
+                        enemy.introTimer--;
+                        
+                        // Level 3 SALLY AWAKENING (Eye Glow -> Tentacle Move)
+                        if (enemy.id === 'SALLY') {
+                            // Phase 1 (0-2s): Eyes glow (Visuals in Draw)
+                            // Phase 2 (2-4s): Tentacles move (Visuals in Draw)
+                            // No particles needed for this specific request, just animation
+                        } 
+                        // Level 2 JUGGERNAUT AWAKENING
+                        else {
+                            // 1. Emit Aura Particles (Spiral In)
+                            const centerX = enemy.x + enemy.width / 2;
+                            const centerY = enemy.y + enemy.height / 2;
+                            if (enemy.introTimer % 3 === 0) {
+                                 const angle = (enemy.introTimer / 5);
+                                 const radius = 40;
+                                 const px = centerX + Math.cos(angle) * radius;
+                                 const py = centerY + Math.sin(angle) * radius;
+                                 
+                                 explosionsRef.current.push({
+                                     x: px,
+                                     y: py,
+                                     id: Math.random().toString(),
+                                     stage: 30, // Life
+                                     active: true,
+                                     type: 'boss_aura',
+                                     vx: (centerX - px) * 0.05, // Suck in
+                                     vy: (centerY - py) * 0.05
+                                 });
+                            }
+    
+                            // 2. Glitch Particles (Random squares)
+                            if (Math.random() > 0.5) {
+                                const range = 50;
+                                const gx = centerX + (Math.random() - 0.5) * range;
+                                const gy = centerY + (Math.random() - 0.5) * range;
+                                const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFFFF'];
+                                const color = colors[Math.floor(Math.random() * colors.length)];
+                                
+                                explosionsRef.current.push({
+                                    x: gx,
+                                    y: gy,
+                                    id: Math.random().toString(),
+                                    stage: 5 + Math.floor(Math.random() * 5),
+                                    active: true,
+                                    type: 'glitch',
+                                    color: color
+                                });
+                            }
+                        }
+                    } else {
+                        // Start Fight
+                        enemy.introState = 'FIGHT';
+                        // Impact explosion on start
+                        explosionsRef.current.push({ 
+                            x: enemy.x + enemy.width/2, 
+                            y: enemy.y + enemy.height/2, 
+                            id: Math.random().toString(), 
+                            stage: 20, 
+                            active: true, 
+                            type: 'impact'
+                        });
+                    }
+                    return;
+                }
+            }
+            // --- END BOSS INTRO ---
             
-            // SALLY SPECIALS: FIRE AURA & LASER
+            // SALLY SPECIALS: FIRE AURA & LASER & MOON DISCS
             if (enemy.id === 'SALLY' && !enemy.isDead) {
+                
+                // IMPORTANT: Block ALL Action if not in FIGHT mode
+                if (enemy.introState !== 'FIGHT') return;
+
+                // BACKSTAB & STUN LOGIC
+                if (enemy.backstabCooldown && enemy.backstabCooldown > 0) enemy.backstabCooldown--;
+                
+                // Check if player is behind Sally to trigger Petrify Stun
+                if (!player.isDead && enemy.phase !== 4 && (!enemy.stunTimer || enemy.stunTimer <= 0) && (!enemy.backstabCooldown || enemy.backstabCooldown <= 0)) {
+                    let isBehind = false;
+                    const bx = enemy.x + enemy.width/2;
+                    const by = enemy.y + enemy.height/2;
+                    const px = player.x + player.width/2;
+                    const py = player.y + player.height/2;
+                    
+                    // Simple "Behind" check based on facing direction
+                    if (enemy.direction === Direction.DOWN) { if (py < by - 10 && Math.abs(px - bx) < enemy.width) isBehind = true; }
+                    else if (enemy.direction === Direction.UP) { if (py > by + 10 && Math.abs(px - bx) < enemy.width) isBehind = true; }
+                    else if (enemy.direction === Direction.LEFT) { if (px > bx + 10 && Math.abs(py - by) < enemy.height) isBehind = true; }
+                    else if (enemy.direction === Direction.RIGHT) { if (px < bx - 10 && Math.abs(py - by) < enemy.height) isBehind = true; }
+                    
+                    // Trigger Stun if very close behind
+                    if (isBehind) {
+                         const dist = Math.sqrt((px-bx)*(px-bx) + (py-by)*(py-by));
+                         if (dist < enemy.width * 1.5) { // Close range
+                             enemy.stunTimer = SALLY_BACKSTAB_DURATION;
+                             enemy.backstabCooldown = SALLY_BACKSTAB_COOLDOWN;
+                             explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 20, active: true, type: 'smoke' }); // Stone dust
+                         }
+                    }
+                }
+
+                if (enemy.stunTimer && enemy.stunTimer > 0) {
+                    enemy.stunTimer--;
+                    // STUNNED STATE - DO NOTHING
+                    return; 
+                }
+
+                // SNAKE TURRETS LOGIC (Every second, small chance to fire red bullet)
+                // 60 checks per second (approx)
+                if (enemy.phase !== 2 && enemy.introState === 'FIGHT') { // Not while petrified/phase 2
+                    // Every 60 frames, run chance
+                    enemy.snakeFireTimer = (enemy.snakeFireTimer || 0) + 1;
+                    if (enemy.snakeFireTimer >= 60) {
+                        enemy.snakeFireTimer = 0;
+                        const numSnakes = 12;
+                        const chance = 0.01; // 1%
+                        
+                        // Loop through hairs
+                        for(let i=0; i<numSnakes; i++) {
+                            if (Math.random() < chance) {
+                                // Fire Red Bullet
+                                const radius = enemy.width/2;
+                                const baseAngle = Math.PI/2 + (Math.PI / (numSnakes-1)) * i;
+                                
+                                // Approximate snake head position
+                                let rotation = 0;
+                                if (enemy.specialState && enemy.specialState !== 'IDLE' && enemy.aimAngle !== undefined) rotation = enemy.aimAngle;
+                                else if (enemy.phase === 4 && enemy.vx && enemy.vy) rotation = Math.atan2(enemy.vy, enemy.vx);
+                                else {
+                                    if(enemy.direction === Direction.RIGHT) rotation = 0;
+                                    else if(enemy.direction === Direction.DOWN) rotation = Math.PI / 2;
+                                    else if(enemy.direction === Direction.LEFT) rotation = Math.PI;
+                                    else if(enemy.direction === Direction.UP) rotation = -Math.PI / 2;
+                                }
+
+                                const angle = rotation + baseAngle;
+                                const sx = (enemy.x + enemy.width/2) + Math.cos(angle) * radius * 1.2;
+                                const sy = (enemy.y + enemy.height/2) + Math.sin(angle) * radius * 1.2;
+                                
+                                // Aim at player
+                                const px = player.x + player.width/2;
+                                const py = player.y + player.height/2;
+                                const fireAngle = Math.atan2(py - sy, px - sx);
+                                
+                                bulletsRef.current.push({
+                                    x: sx,
+                                    y: sy,
+                                    width: BULLET_SIZE * 1.5,
+                                    height: BULLET_SIZE * 1.5,
+                                    direction: Direction.DOWN, // N/A
+                                    speed: SALLY_SNAKE_BULLET_SPEED,
+                                    owner: 'boss',
+                                    active: true,
+                                    id: Math.random().toString(),
+                                    vx: Math.cos(fireAngle) * SALLY_SNAKE_BULLET_SPEED,
+                                    vy: Math.sin(fireAngle) * SALLY_SNAKE_BULLET_SPEED,
+                                    variant: 'red_snake'
+                                });
+                            }
+                        }
+                    }
+                }
+
                 // --- SALLY PHASE LOGIC ---
                 const hpPercent = enemy.hp / enemy.maxHp;
                 if (!enemy.phase) enemy.phase = 1;
@@ -602,11 +861,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 if (hpPercent <= 0.25 && enemy.phase < 4) {
                     enemy.phase = 4;
                     // Init Phase 4 Physics (Arc/Bounce)
-                    // Pick a random starting diagonal velocity
                     const angle = Math.random() * Math.PI * 2;
                     enemy.vx = Math.cos(angle) * SALLY_PHASE_4_BASE_SPEED;
                     enemy.vy = Math.sin(angle) * SALLY_PHASE_4_BASE_SPEED;
-                    // Reset Specials
                     enemy.specialState = 'IDLE'; 
                     explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 30, active: true, type: 'impact' });
                 } else if (hpPercent <= 0.50 && enemy.phase < 3) {
@@ -614,19 +871,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 20, active: true, type: 'glitch', color: '#FF0000' });
                 } else if (hpPercent <= 0.75 && enemy.phase < 2) {
                     enemy.phase = 2;
-                    enemy.petrifyTimer = SALLY_PETRIFY_DURATION;
+                    // Phase 2 Start: Stone smoke
                     explosionsRef.current.push({ x: enemy.x, y: enemy.y, id: Math.random().toString(), stage: 30, active: true, type: 'smoke' });
                 }
 
-                // Phase 2 Petrify Logic
-                if (enemy.phase === 2) {
-                    if (enemy.petrifyTimer && enemy.petrifyTimer > 0) {
-                        enemy.petrifyTimer--;
-                    }
-                }
-
-                // Emit Fire Particles (except in Petrify/Phase 2)
-                if (enemy.phase !== 2 && Math.random() > 0.3) {
+                // Emit Fire Particles (except in Phase 2)
+                if (enemy.phase !== 2 && Math.random() > 0.3 && enemy.introState === 'FIGHT') {
                      const cx = enemy.x + enemy.width/2;
                      const cy = enemy.y + enemy.height/2;
                      const angle = Math.random() * Math.PI * 2;
@@ -646,23 +896,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
 
                 // --- SALLY PHASE 4: MADNESS & EATING ---
-                if (enemy.phase === 4) {
-                    // Update Position based on Physics
+                if (enemy.phase === 4 && enemy.introState === 'FIGHT') {
+                    // (Logic same as previous Phase 4 implementation)
                     const vx = enemy.vx || 0;
                     const vy = enemy.vy || 0;
-                    
                     let nextX = enemy.x + vx;
                     let nextY = enemy.y + vy;
-                    
-                    // Simple Acceleration on bounce
                     const accelerate = 1.05;
                     const maxSpeed = SALLY_PHASE_4_BASE_SPEED * 2.5;
 
-                    // Wall Collision (Bounce)
                     let bounced = false;
                     if (nextX < 0 || nextX + enemy.width > CANVAS_WIDTH || checkMapCollision({...enemy, x: nextX, y: enemy.y})) {
                         enemy.vx = -vx * accelerate;
-                        // Clamp speed
                         if (Math.abs(enemy.vx) > maxSpeed) enemy.vx = Math.sign(enemy.vx) * maxSpeed;
                         nextX = enemy.x + enemy.vx;
                         bounced = true;
@@ -683,7 +928,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         explosionsRef.current.push({ x: enemy.x + enemy.width/2, y: enemy.y + enemy.height/2, id: Math.random().toString(), stage: 10, active: true, type: 'impact' });
                     }
 
-                    // Homing / Steering towards Player (Try to eat)
                     if (!player.isDead) {
                         const ex = enemy.x + enemy.width/2;
                         const ey = enemy.y + enemy.height/2;
@@ -691,189 +935,244 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         const py = player.y + player.height/2;
                         
                         const angleToPlayer = Math.atan2(py - ey, px - ex);
-                        const steerStrength = 0.15; // How hard it turns
+                        const steerStrength = 0.15; 
                         
                         if (enemy.vx !== undefined && enemy.vy !== undefined) {
                             enemy.vx += Math.cos(angleToPlayer) * steerStrength;
                             enemy.vy += Math.sin(angleToPlayer) * steerStrength;
                         }
                         
-                        // Contact Damage (Instant Kill)
+                        // BOSS VS PLAYER COLLISION
                         if (checkRectCollision(enemy, player)) {
-                            player.hp = 0;
-                            player.isDead = true;
-                            setGameState(GameState.GAME_OVER);
-                            onPlayerDeath();
-                            explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 20, active: true, type: 'impact' });
+                            if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+                                // Hit during invulnerability: do nothing
+                            } else {
+                                player.hp = 0;
+                                setPlayerHp(0); // Sync UI
+                                player.isDead = true;
+                                setGameState(GameState.GAME_OVER);
+                                onPlayerDeath();
+                                explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 20, active: true, type: 'impact' });
+                            }
                         }
                     }
-
-                    // No shooting in Phase 4
                     return; 
                 }
 
-                // --- SALLY LASER + SHOTGUN LOGIC (Phases 1-3) ---
-                // State Machine: IDLE -> PRE_CHARGE -> CHARGING -> FIRING -> SHOTGUN -> IDLE
-                if (enemy.specialState === 'IDLE' || !enemy.specialState) {
-                    if (enemy.specialTimer === undefined) enemy.specialTimer = SALLY_LASER_COOLDOWN;
-                    
-                    // Movement Logic (Phase 1, 2, 3)
+                // --- SALLY PHASE 1, 2, 3: MOVEMENT & ATTACKS ---
+                if (enemy.introState === 'FIGHT') {
+                    // Special State Reset if entering Phase 2 (to stop laser)
+                    if (enemy.phase === 2 && enemy.specialState !== 'IDLE') {
+                        enemy.specialState = 'IDLE';
+                        enemy.specialTimer = 0;
+                    }
+
+                    // --- MOVEMENT LOGIC ---
                     if (!player.isDead) {
-                        // PHASE 3: MIRRORED MOVEMENT (Madness)
+                        // PHASE 3: MIRRORED
                         if (enemy.phase === 3) {
                             const lastKey = moveKeysRef.current[moveKeysRef.current.length - 1];
                             let dx = 0;
                             let dy = 0;
-                            const speed = enemy.speed * 1.25; // 25% faster
+                            // Increased Speed in Phase 3
+                            const speed = enemy.speed * 1.6; 
 
-                            // Mirror Input: Player Up -> Boss Down
                             if (lastKey === 'ArrowUp' || lastKey === 'KeyW') { dy = speed; enemy.direction = Direction.DOWN; }
                             else if (lastKey === 'ArrowDown' || lastKey === 'KeyS') { dy = -speed; enemy.direction = Direction.UP; }
                             else if (lastKey === 'ArrowLeft' || lastKey === 'KeyA') { dx = speed; enemy.direction = Direction.RIGHT; }
                             else if (lastKey === 'ArrowRight' || lastKey === 'KeyD') { dx = -speed; enemy.direction = Direction.LEFT; }
                             
-                            // Apply Movement if not colliding
-                            if (dx !== 0) {
-                                if (!checkMapCollision({...enemy, x: enemy.x + dx})) enemy.x += dx;
-                            }
-                            if (dy !== 0) {
-                                if (!checkMapCollision({...enemy, y: enemy.y + dy})) enemy.y += dy;
-                            }
+                            if (dx !== 0 && !checkMapCollision({...enemy, x: enemy.x + dx})) enemy.x += dx;
+                            if (dy !== 0 && !checkMapCollision({...enemy, y: enemy.y + dy})) enemy.y += dy;
                         } 
-                        // PHASE 1 & 2: Standard Logic
+                        // PHASE 1 & 2: TRACKING
                         else {
                             const centerX = enemy.x + enemy.width / 2;
                             const centerY = enemy.y + enemy.height / 2;
                             const pCenterX = player.x + player.width / 2;
                             const pCenterY = player.y + player.height / 2;
                             
-                            // Horizontal Approach
+                            // Phase 2 is Slowed
+                            const moveSpeed = (enemy.phase === 2) ? enemy.speed * 0.75 : enemy.speed;
+
+                            // Jitter (Phase 1 Only)
+                            let jitterX = 0;
+                            let jitterY = 0;
+                            if (enemy.phase === 1 && Math.random() < 0.2) { 
+                                const jerkAmt = 4;
+                                if (enemy.direction === Direction.UP || enemy.direction === Direction.DOWN) {
+                                    jitterX = (Math.random() - 0.5) * jerkAmt;
+                                } else {
+                                    jitterY = (Math.random() - 0.5) * jerkAmt;
+                                }
+                            }
+
                             if (Math.abs(centerX - pCenterX) > 10) {
-                                 const dx = pCenterX > centerX ? enemy.speed : -enemy.speed;
-                                 if (!checkMapCollision({...enemy, x: enemy.x + dx})) {
-                                     enemy.x += dx;
+                                 const dx = pCenterX > centerX ? moveSpeed : -moveSpeed;
+                                 if (!checkMapCollision({...enemy, x: enemy.x + dx + jitterX, y: enemy.y + jitterY})) {
+                                     enemy.x += dx + jitterX;
+                                     enemy.y += jitterY;
                                      enemy.direction = dx > 0 ? Direction.RIGHT : Direction.LEFT;
                                  }
                             }
-                            // Vertical Approach
                             if (Math.abs(centerY - pCenterY) > 10) {
-                                 const dy = pCenterY > centerY ? enemy.speed : -enemy.speed;
-                                 if (!checkMapCollision({...enemy, y: enemy.y + dy})) {
-                                     enemy.y += dy;
+                                 const dy = pCenterY > centerY ? moveSpeed : -moveSpeed;
+                                 if (!checkMapCollision({...enemy, y: enemy.y + dy + jitterY, x: enemy.x + jitterX})) {
+                                     enemy.y += dy + jitterY;
+                                     enemy.x += jitterX;
                                      enemy.direction = dy > 0 ? Direction.DOWN : Direction.UP;
                                  }
                             }
                         }
                     }
 
-                    if (enemy.specialTimer > 0) {
-                        enemy.specialTimer--;
-                    } else {
-                        // Start Attack
-                        enemy.specialState = 'PRE_CHARGE';
-                        enemy.specialTimer = SALLY_PRE_CHARGE;
-                        enemy.speed = 0; 
-                    }
-                } else if (enemy.specialState === 'PRE_CHARGE') {
-                    // Phase 1: Stop and Lock Aim
-                    if (enemy.specialTimer && enemy.specialTimer > 0) {
-                        enemy.specialTimer--;
-                    } else {
-                        enemy.specialState = 'CHARGING';
-                        enemy.specialTimer = SALLY_CHARGE;
-                        
-                        // Calculate Aim Angle once
-                        if (!player.isDead) {
-                            const ecx = enemy.x + enemy.width/2;
-                            const ecy = enemy.y + enemy.height/2;
-                            const pcx = player.x + player.width/2;
-                            const pcy = player.y + player.height/2;
-                            enemy.aimAngle = Math.atan2(pcy - ecy, pcx - ecx);
+                    // --- ATTACK LOGIC ---
+                    
+                    // PHASE 2: MOON DISCS (Independent cooldown)
+                    if (enemy.phase === 2) {
+                        enemy.moonDiscTimer = (enemy.moonDiscTimer || 0) - 1;
+                        if (enemy.moonDiscTimer <= 0) {
+                            enemy.moonDiscTimer = SALLY_MOON_DISC_COOLDOWN;
+                            // Fire Disc
+                            const eCx = enemy.x + enemy.width / 2;
+                            const eCy = enemy.y + enemy.height / 2;
+                            const pCx = player.x + player.width / 2;
+                            const pCy = player.y + player.height / 2;
+                            const angle = Math.atan2(pCy - eCy, pCx - eCx);
+                            
+                            bulletsRef.current.push({
+                                x: eCx - SALLY_MOON_DISC_SIZE/2,
+                                y: eCy - SALLY_MOON_DISC_SIZE/2,
+                                width: SALLY_MOON_DISC_SIZE,
+                                height: SALLY_MOON_DISC_SIZE,
+                                direction: Direction.DOWN, // Irrelevant
+                                speed: SALLY_MOON_DISC_SPEED,
+                                owner: 'boss',
+                                active: true,
+                                id: Math.random().toString(),
+                                vx: Math.cos(angle) * SALLY_MOON_DISC_SPEED,
+                                vy: Math.sin(angle) * SALLY_MOON_DISC_SPEED,
+                                variant: 'moon_disc',
+                                bounceCount: SALLY_MOON_DISC_BOUNCES
+                            });
                         }
-                    }
-                } else if (enemy.specialState === 'CHARGING') {
-                    // Phase 2: Charge up
-                    if (enemy.specialTimer && enemy.specialTimer > 0) {
-                        enemy.specialTimer--;
-                    } else {
-                        enemy.specialState = 'FIRING';
-                        enemy.specialTimer = SALLY_LASER_DURATION;
-                    }
-                } else if (enemy.specialState === 'FIRING') {
-                    // Phase 3: Fire Laser
-                    if (!player.isDead && checkLaserCollision(enemy, enemy.aimAngle || 0, player, SALLY_LASER_WIDTH)) {
-                        // 1 hit every 10 frames
-                        if (enemy.specialTimer && enemy.specialTimer % 10 === 0) {
-                            player.hp -= 1;
-                            if (player.hp <= 0) {
-                                 player.isDead = true;
-                                 explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
-                                 setGameState(GameState.GAME_OVER);
-                                 onPlayerDeath();
+                    } 
+                    // PHASE 1 & 3: LASER (Phase 3) OR SHOTGUN (Phase 1)
+                    else {
+                        if (enemy.specialState === 'IDLE' || !enemy.specialState) {
+                            if (enemy.specialTimer === undefined) enemy.specialTimer = SALLY_LASER_COOLDOWN;
+                            
+                            if (enemy.specialTimer > 0) {
+                                enemy.specialTimer--;
                             } else {
-                                 explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
+                                // Start Attack - Laser Phase 3+, Shotgun Phase 1
+                                if (enemy.phase && enemy.phase >= 3) {
+                                     enemy.specialState = 'PRE_CHARGE';
+                                     enemy.specialTimer = SALLY_PRE_CHARGE;
+                                } else {
+                                     enemy.specialState = 'SHOTGUN';
+                                     enemy.specialTimer = 0;
+                                     enemy.burstCount = 0;
+                                }
                             }
-                        }
-                    }
+                        } else if (enemy.specialState === 'PRE_CHARGE') {
+                            if (enemy.specialTimer && enemy.specialTimer > 0) {
+                                enemy.specialTimer--;
+                            } else {
+                                enemy.specialState = 'CHARGING';
+                                enemy.specialTimer = SALLY_CHARGE;
+                                if (!player.isDead) {
+                                    const ecx = enemy.x + enemy.width/2;
+                                    const ecy = enemy.y + enemy.height/2;
+                                    const pcx = player.x + player.width/2;
+                                    const pcy = player.y + player.height/2;
+                                    enemy.aimAngle = Math.atan2(pcy - ecy, pcx - ecx);
+                                }
+                            }
+                        } else if (enemy.specialState === 'CHARGING') {
+                            if (enemy.specialTimer && enemy.specialTimer > 0) {
+                                enemy.specialTimer--;
+                            } else {
+                                enemy.specialState = 'FIRING';
+                                enemy.specialTimer = SALLY_LASER_DURATION;
+                            }
+                        } else if (enemy.specialState === 'FIRING') {
+                            if (!player.isDead && checkLaserCollision(enemy, enemy.aimAngle || 0, player, SALLY_LASER_WIDTH)) {
+                                if (enemy.specialTimer && enemy.specialTimer % 10 === 0) {
+                                    // Check Invulnerability for Laser
+                                    if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+                                        // Invulnerable
+                                    } else {
+                                        player.hp -= 1;
+                                        setPlayerHp(player.hp); // Sync UI
+                                        player.invulnerabilityTimer = 30; // 0.5s invulnerability
+                                        if (player.hp <= 0) {
+                                             player.isDead = true;
+                                             explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
+                                             setGameState(GameState.GAME_OVER);
+                                             onPlayerDeath();
+                                        } else {
+                                             explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
+                                        }
+                                    }
+                                }
+                            }
 
-                    if (enemy.specialTimer && enemy.specialTimer > 0) {
-                        enemy.specialTimer--;
-                    } else {
-                        // END FIRING -> TRIGGER LASER TRACE -> GOTO SHOTGUN
-                        explosionsRef.current.push({ 
-                             x: enemy.x + enemy.width/2, 
-                             y: enemy.y + enemy.height/2, 
-                             id: Math.random().toString(), 
-                             stage: SALLY_LASER_TRACE_DURATION, 
-                             active: true, 
-                             type: 'laser_trace',
-                             angle: enemy.aimAngle 
-                        });
-
-                        enemy.specialState = 'SHOTGUN';
-                        enemy.specialTimer = 0; // Immediate first burst
-                        enemy.burstCount = 0;
-                    }
-                } else if (enemy.specialState === 'SHOTGUN') {
-                    // Phase 4: Shotgun Bursts (3 bursts)
-                    if (enemy.specialTimer && enemy.specialTimer > 0) {
-                        enemy.specialTimer--;
-                    } else {
-                        // Check if we finished 3 bursts
-                        if (enemy.burstCount !== undefined && enemy.burstCount >= 3) {
-                             enemy.specialState = 'IDLE';
-                             enemy.specialTimer = SALLY_LASER_COOLDOWN;
-                             enemy.speed = SALLY_SPEED;
-                        } else {
-                             // FIRE BURST
-                             const bCx = enemy.x + enemy.width / 2;
-                             const bCy = enemy.y + enemy.height / 2;
-                             const pCx = player.x + player.width / 2;
-                             const pCy = player.y + player.height / 2;
-                             const baseAngle = Math.atan2(pCy - bCy, pCx - bCx);
-                             
-                             for (let k = 0; k < SALLY_SHOTGUN_BULLET_COUNT; k++) {
-                                 const spread = (Math.random() - 0.5) * (Math.PI / 2.5); // Wider spread
-                                 const angle = baseAngle + spread;
-                                 bulletsRef.current.push({
-                                     x: bCx - BULLET_SIZE / 2,
-                                     y: bCy - BULLET_SIZE / 2,
-                                     width: BULLET_SIZE,
-                                     height: BULLET_SIZE,
-                                     direction: Direction.DOWN,
-                                     speed: BOSS_BULLET_SPEED,
-                                     owner: 'boss',
-                                     active: true,
-                                     id: Math.random().toString(),
-                                     vx: Math.cos(angle) * BOSS_BULLET_SPEED,
-                                     vy: Math.sin(angle) * BOSS_BULLET_SPEED,
-                                     variant: 'standard'
-                                 });
-                             }
-                             explosionsRef.current.push({ x: bCx, y: bCy, id: Math.random().toString(), stage: 10, active: true, type: 'impact' });
-                             
-                             enemy.burstCount = (enemy.burstCount || 0) + 1;
-                             enemy.specialTimer = SALLY_SHOTGUN_BURST_DELAY;
+                            if (enemy.specialTimer && enemy.specialTimer > 0) {
+                                enemy.specialTimer--;
+                            } else {
+                                explosionsRef.current.push({ 
+                                     x: enemy.x + enemy.width/2, 
+                                     y: enemy.y + enemy.height/2, 
+                                     id: Math.random().toString(), 
+                                     stage: SALLY_LASER_TRACE_DURATION, 
+                                     active: true, 
+                                     type: 'laser_trace',
+                                     angle: enemy.aimAngle 
+                                });
+                                // PHASE 3: Loop back to IDLE after Laser
+                                // PHASE 1 (If it ever got here): Logic would be different, but Phase 1 uses SHOTGUN path
+                                enemy.specialState = 'IDLE'; 
+                                enemy.specialTimer = SALLY_LASER_COOLDOWN;
+                            }
+                        } else if (enemy.specialState === 'SHOTGUN') {
+                            if (enemy.specialTimer && enemy.specialTimer > 0) {
+                                enemy.specialTimer--;
+                            } else {
+                                if (enemy.burstCount !== undefined && enemy.burstCount >= 3) {
+                                     enemy.specialState = 'IDLE';
+                                     enemy.specialTimer = SALLY_LASER_COOLDOWN;
+                                } else {
+                                     const bCx = enemy.x + enemy.width / 2;
+                                     const bCy = enemy.y + enemy.height / 2;
+                                     const pCx = player.x + player.width / 2;
+                                     const pCy = player.y + player.height / 2;
+                                     const baseAngle = Math.atan2(pCy - bCy, pCx - bCx);
+                                     
+                                     for (let k = 0; k < SALLY_SHOTGUN_BULLET_COUNT; k++) {
+                                         const spread = (Math.random() - 0.5) * ((Math.PI / 2.5) * 0.85); 
+                                         const angle = baseAngle + spread;
+                                         bulletsRef.current.push({
+                                             x: bCx - BULLET_SIZE / 2,
+                                             y: bCy - BULLET_SIZE / 2,
+                                             width: BULLET_SIZE,
+                                             height: BULLET_SIZE,
+                                             direction: Direction.DOWN,
+                                             speed: SALLY_BULLET_SPEED,
+                                             owner: 'boss',
+                                             active: true,
+                                             id: Math.random().toString(),
+                                             vx: Math.cos(angle) * SALLY_BULLET_SPEED,
+                                             vy: Math.sin(angle) * SALLY_BULLET_SPEED,
+                                             variant: 'standard'
+                                         });
+                                     }
+                                     explosionsRef.current.push({ x: bCx, y: bCy, id: Math.random().toString(), stage: 10, active: true, type: 'impact' });
+                                     
+                                     enemy.burstCount = (enemy.burstCount || 0) + 1;
+                                     enemy.specialTimer = SALLY_SHOTGUN_BURST_DELAY;
+                                }
+                            }
                         }
                     }
                 }
@@ -898,76 +1197,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     enemy.defenseBuffTimer = 600; 
                 }
             }
-
-            // --- BOSS INTRO LOGIC (Level 2 Specific) ---
-            if (level === 2) {
-                if (enemy.introState === 'DORMANT') {
-                    // Waiting for fog to clear, logic handled in checkFogOverlap
-                    return; 
-                }
-
-                if (enemy.introState === 'AWAKENING') {
-                    if (enemy.introTimer && enemy.introTimer > 0) {
-                        enemy.introTimer--;
-                        
-                        // PARTICLE LOGIC
-                        const centerX = enemy.x + enemy.width / 2;
-                        const centerY = enemy.y + enemy.height / 2;
-                        
-                        // 1. Emit Aura Particles (Spiral In)
-                        if (enemy.introTimer % 3 === 0) {
-                             const angle = (enemy.introTimer / 5);
-                             const radius = 40;
-                             const px = centerX + Math.cos(angle) * radius;
-                             const py = centerY + Math.sin(angle) * radius;
-                             
-                             explosionsRef.current.push({
-                                 x: px,
-                                 y: py,
-                                 id: Math.random().toString(),
-                                 stage: 30, // Life
-                                 active: true,
-                                 type: 'boss_aura',
-                                 vx: (centerX - px) * 0.05, // Suck in
-                                 vy: (centerY - py) * 0.05
-                             });
-                        }
-
-                        // 2. Glitch Particles (Random squares)
-                        if (Math.random() > 0.5) {
-                            const range = 50;
-                            const gx = centerX + (Math.random() - 0.5) * range;
-                            const gy = centerY + (Math.random() - 0.5) * range;
-                            const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFFFF'];
-                            const color = colors[Math.floor(Math.random() * colors.length)];
-                            
-                            explosionsRef.current.push({
-                                x: gx,
-                                y: gy,
-                                id: Math.random().toString(),
-                                stage: 5 + Math.floor(Math.random() * 5),
-                                active: true,
-                                type: 'glitch',
-                                color: color
-                            });
-                        }
-                    } else {
-                        // Start Fight
-                        enemy.introState = 'FIGHT';
-                        // Impact explosion on start
-                        explosionsRef.current.push({ 
-                            x: enemy.x + enemy.width/2, 
-                            y: enemy.y + enemy.height/2, 
-                            id: Math.random().toString(), 
-                            stage: 20, 
-                            active: true, 
-                            type: 'impact'
-                        });
-                    }
-                    return;
-                }
-            }
-            // --- END BOSS INTRO ---
 
             // Skip AI if not fighting
             if (enemy.introState && enemy.introState !== 'FIGHT') return;
@@ -1181,208 +1410,197 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         }
     });
 
-    // --- Bullet Collision (Bullet vs Bullet) ---
-    for (let i = 0; i < bulletsRef.current.length; i++) {
-        for (let j = i + 1; j < bulletsRef.current.length; j++) {
-            const b1 = bulletsRef.current[i];
-            const b2 = bulletsRef.current[j];
-            
-            // Glasscannon ignores bullet collision (unstoppable)
-            if (b1.variant === 'glasscannon' || b2.variant === 'glasscannon') continue;
+    // --- Bullet Updates ---
+    bulletsRef.current.forEach(bullet => {
+        if (!bullet.active) return;
 
-            if (b1.active && b2.active && b1.owner !== b2.owner && checkRectCollision(b1, b2)) {
-                b1.active = false;
-                b2.active = false;
-                const midX = (b1.x + b2.x) / 2;
-                const midY = (b1.y + b2.y) / 2;
-                explosionsRef.current.push({ x: midX - 10, y: midY - 10, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
+        // Handle Moon Disc Bouncing (Special Physics)
+        if (bullet.variant === 'moon_disc' && bullet.vx !== undefined && bullet.vy !== undefined) {
+            // Predict X movement
+            const nextX = bullet.x + bullet.vx;
+            // Check collisions at nextX, current Y
+            let hitX = false;
+            if (nextX < 0 || nextX > CANVAS_WIDTH || checkMapCollision({...bullet, x: nextX, y: bullet.y})) {
+                hitX = true;
+            }
 
-                // --- BOSS PASSIVE: Bullet vs Bullet Counter ---
-                // Trigger: Boss Bullet hits Player Bullet
-                if ((b1.owner === 'boss' && b2.owner === 'player') || (b1.owner === 'player' && b2.owner === 'boss')) {
-                    const boss = enemiesRef.current.find(e => e.type === 'boss');
-                    if (boss && boss.introState === 'FIGHT') {
-                         boss.bulletCollisionCount = (boss.bulletCollisionCount || 0) + 1;
-                         
-                         // Check Trigger Condition: 3 collisions AND cooldown is ready
-                         if (boss.bulletCollisionCount >= 3 && (!boss.shotgunCooldown || boss.shotgunCooldown <= 0)) {
-                             // --- FIRE SHOTGUN ---
-                             const bCx = boss.x + boss.width / 2;
-                             const bCy = boss.y + boss.height / 2;
-                             const pCx = player.x + player.width / 2;
-                             const pCy = player.y + player.height / 2;
-                             const baseAngle = Math.atan2(pCy - bCy, pCx - bCx);
-                             
-                             // Spawn 10 bullets with random spread
-                             for (let k = 0; k < 10; k++) {
-                                 // Spread +/- 30 degrees (PI/6)
-                                 const spread = (Math.random() - 0.5) * (Math.PI / 3); 
-                                 const angle = baseAngle + spread;
-                                 
-                                 bulletsRef.current.push({
-                                     x: bCx - BULLET_SIZE / 2,
-                                     y: bCy - BULLET_SIZE / 2,
-                                     width: BULLET_SIZE,
-                                     height: BULLET_SIZE,
-                                     direction: Direction.DOWN, // Irrelevant with vectors
-                                     speed: BOSS_BULLET_SPEED,
-                                     owner: 'boss',
-                                     active: true,
-                                     id: Math.random().toString(),
-                                     vx: Math.cos(angle) * BOSS_BULLET_SPEED,
-                                     vy: Math.sin(angle) * BOSS_BULLET_SPEED,
-                                     variant: 'standard'
-                                 });
-                             }
-                             
-                             // Reset
-                             boss.bulletCollisionCount = 0;
-                             boss.shotgunCooldown = 240; // 4 seconds * 60 FPS
-                             
-                             // Visual Effect for Trigger
-                             explosionsRef.current.push({ x: bCx, y: bCy, id: Math.random().toString(), stage: 15, active: true, type: 'impact' });
-                         }
-                    }
+            if (hitX) {
+                bullet.vx = -bullet.vx; // Reflect
+                bullet.bounceCount = (bullet.bounceCount || 0) - 1;
+            } else {
+                bullet.x = nextX;
+            }
+
+            // Predict Y movement
+            const nextY = bullet.y + bullet.vy;
+            let hitY = false;
+            if (nextY < 0 || nextY > CANVAS_HEIGHT || checkMapCollision({...bullet, x: bullet.x, y: nextY})) {
+                hitY = true;
+            }
+
+            if (hitY) {
+                bullet.vy = -bullet.vy; // Reflect
+                bullet.bounceCount = (bullet.bounceCount || 0) - 1;
+            } else {
+                bullet.y = nextY;
+            }
+
+            // ADDED: Player Collision Check
+            if (bullet.owner === 'boss' && !playerRef.current.isDead) {
+                if (checkRectCollision(bullet, playerRef.current)) {
+                     // Check invulnerability
+                     if (playerRef.current.invulnerabilityTimer && playerRef.current.invulnerabilityTimer > 0) {
+                         // Invulnerable: Ignore or Absorb
+                         bullet.active = false;
+                         explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+                         return;
+                     }
+
+                     bullet.active = false;
+                     explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+                     playerRef.current.hp -= 1;
+                     setPlayerHp(playerRef.current.hp); // Sync UI
+                     playerRef.current.invulnerabilityTimer = 30; // 0.5s Invulnerability
+                     if (playerRef.current.hp <= 0) {
+                         playerRef.current.isDead = true;
+                         setGameState(GameState.GAME_OVER);
+                         onPlayerDeath();
+                         explosionsRef.current.push({ x: playerRef.current.x, y: playerRef.current.y, id: Math.random().toString(), stage: 20, active: true, type: 'standard' });
+                     }
+                     return; 
                 }
             }
-        }
-    }
 
-    // --- Bullets Logic ---
-    bulletsRef.current.forEach(b => {
-        if (!b.active) return;
-        
-        // Handle vector movement or direction movement
-        if (b.variant === 'glasscannon') {
-            // Homing logic: Update velocity to point towards player
-             if (!player.isDead) {
-                const bCx = b.x + b.width/2;
-                const bCy = b.y + b.height/2;
-                const pCx = player.x + player.width/2;
-                const pCy = player.y + player.height/2;
-                const angle = Math.atan2(pCy - bCy, pCx - bCx);
-                b.vx = Math.cos(angle) * b.speed;
-                b.vy = Math.sin(angle) * b.speed;
-             }
-             // Apply movement
-             if (b.vx !== undefined && b.vy !== undefined) {
-                 b.x += b.vx;
-                 b.y += b.vy;
-             }
-        } else if (b.vx !== undefined && b.vy !== undefined) {
-            b.x += b.vx;
-            b.y += b.vy;
+            if ((bullet.bounceCount || 0) < 0) {
+                bullet.active = false;
+                explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+            }
+            return; // Skip standard bullet logic
+        }
+
+        // Standard Movement
+        if (bullet.vx !== undefined && bullet.vy !== undefined) {
+             bullet.x += bullet.vx;
+             bullet.y += bullet.vy;
         } else {
-            if (b.direction === Direction.UP) b.y -= b.speed;
-            if (b.direction === Direction.DOWN) b.y += b.speed;
-            if (b.direction === Direction.LEFT) b.x -= b.speed;
-            if (b.direction === Direction.RIGHT) b.x += b.speed;
+             if (bullet.direction === Direction.UP) bullet.y -= bullet.speed;
+             else if (bullet.direction === Direction.DOWN) bullet.y += bullet.speed;
+             else if (bullet.direction === Direction.LEFT) bullet.x -= bullet.speed;
+             else if (bullet.direction === Direction.RIGHT) bullet.x += bullet.speed;
+        }
+
+        // Screen Bounds (Standard bullets die)
+        if (bullet.x < 0 || bullet.x > CANVAS_WIDTH || bullet.y < 0 || bullet.y > CANVAS_HEIGHT) {
+            bullet.active = false;
+            return;
         }
 
         // Map Collision
-        const mapHit = checkBulletMapCollision(b);
-        if (mapHit.hit) {
-            b.active = false;
-            explosionsRef.current.push({ x: b.x - 10, y: b.y - 10, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
-            if (mapHit.tileX >= 0) damageTile(mapHit.tileX, mapHit.tileY);
-            if (!baseActiveRef.current) setGameState(GameState.GAME_OVER);
+        const { hit, tileX, tileY } = checkBulletMapCollision(bullet);
+        if (hit) {
+            bullet.active = false;
+            // Explosion at impact
+            explosionsRef.current.push({
+                 x: bullet.x + bullet.width/2,
+                 y: bullet.y + bullet.height/2,
+                 id: Math.random().toString(),
+                 stage: 5,
+                 active: true,
+                 type: 'impact'
+            });
+            
+            if (tileX >= 0 && tileY >= 0) {
+                 damageTile(tileX, tileY);
+                 // If base hit
+                 if (!baseActiveRef.current) {
+                      setGameState(GameState.GAME_OVER);
+                 }
+            }
+            return;
         }
 
-        // Tank Collision
-        if (b.active) {
-            if (b.owner === 'player') {
-                enemiesRef.current.forEach(e => {
-                    // Larger collision box for glasscannon hit check against boss? No, glasscannon is boss bullet.
-                    // Check if player bullet hit enemy
-                    if (checkRectCollision(b, e)) {
-                        b.active = false;
-                        
-                        // Invulnerable during Intro
-                        if (e.introState && e.introState !== 'FIGHT') return;
-
-                        // Sally Phase 2 Petrified - INVULNERABLE
-                        if (e.id === 'SALLY' && e.phase === 2 && e.petrifyTimer && e.petrifyTimer > 0) {
-                             explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 5, active: true, type: 'smoke' }); // Stone dust
-                             return;
-                        }
-
-                        // Damage Logic
-                        let damage = 1;
-                        // Boss Defense Buff Mechanic
-                        if (e.type === 'boss' && e.defenseBuffTimer && e.defenseBuffTimer > 0) {
-                            damage = 0.5; // 50% Damage Reduction
-                            // Visual indication of block?
-                            explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 3, active: true, type: 'smoke' }); // Grey smoke for "block"
-                        }
-
-                        e.hp -= damage;
-                        
-                        if (e.hp <= 0) {
-                            e.isDead = true;
-                            setScore(prev => prev + (e.type === 'boss' ? 20 : 1)); // Updated scoring here
-                            setEnemiesLeft(prev => prev - 1);
-                            explosionsRef.current.push({ x: e.x, y: e.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
-                        } else {
-                            // Hit effect
-                            explosionsRef.current.push({ x: b.x - 5, y: b.y - 5, id: Math.random().toString(), stage: 3, active: true, type: 'standard' });
-                        }
-                    }
-                });
-            } else { // Enemy or Boss bullet
-                if (!player.isDead && checkRectCollision(b, player)) {
-                    b.active = false;
-                    player.hp -= 1;
+        // Entity Collision
+        if (bullet.owner === 'player') {
+            // Vs Enemies
+            for (const enemy of enemiesRef.current) {
+                if (checkRectCollision(bullet, enemy)) {
+                    bullet.active = false;
+                    // Explosion
+                    explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
                     
-                    if (player.hp <= 0) {
-                         player.isDead = true;
-                         explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
-                         setGameState(GameState.GAME_OVER);
-                         onPlayerDeath();
+                    if (enemy.introState && enemy.introState !== 'FIGHT') {
+                        // Invulnerable during specific non-fight states
                     } else {
-                         // Small explosion on player hit to indicate damage
-                         explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
+                        let damage = 1;
+                        // Boss defense
+                        if (enemy.defenseBuffTimer && enemy.defenseBuffTimer > 0) damage = 0.5;
+                        
+                        // SALLY PHASE 2 DEFENSE (Petrified)
+                        if (enemy.id === 'SALLY' && enemy.phase === 2) damage = 0.25; 
+
+                        // Backstab bonus for Sally
+                        if (enemy.stunTimer && enemy.stunTimer > 0) damage *= 2;
+
+                        enemy.hp -= damage;
+                        if (enemy.hp <= 0) {
+                            enemy.isDead = true;
+                            setScore(prev => prev + (enemy.type === 'boss' ? 1000 : 100));
+                            explosionsRef.current.push({ x: enemy.x + enemy.width/2, y: enemy.y + enemy.height/2, id: Math.random().toString(), stage: 20, active: true, type: 'standard' });
+                        }
                     }
+                    return;
                 }
+            }
+        } else {
+            // Vs Player
+            if (!player.isDead && checkRectCollision(bullet, player)) {
+                bullet.active = false;
+                 explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+                 
+                 // Check Invulnerability
+                 if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+                     return;
+                 }
+                 
+                 player.hp -= 1;
+                 setPlayerHp(player.hp); // Sync UI
+                 player.invulnerabilityTimer = 30; // 0.5s Invulnerability
+
+                 if (player.hp <= 0) {
+                     player.isDead = true;
+                     setGameState(GameState.GAME_OVER);
+                     onPlayerDeath();
+                     explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 20, active: true, type: 'standard' });
+                 }
+                 return;
             }
         }
     });
     
-    // --- Particle Logic ---
-    explosionsRef.current.forEach(e => {
-        if (e.type === 'boss_aura') {
-            if (e.vx) e.x += e.vx;
-            if (e.vy) e.y += e.vy;
-        } else if (e.type === 'fire') {
-            if (e.vx) e.x += e.vx;
-            if (e.vy) e.y += e.vy;
-            // Flicker size? Handled in draw
-        }
-    });
-
-    // Check Victory
-    const aliveEnemies = enemiesRef.current.filter(e => !e.isDead).length;
-    // For level 1, checking spawn count. For level 2, just checking if Jugg is dead (since spawned is 0)
-    const allDead = enemiesRef.current.length > 0 && enemiesRef.current.every(e => e.isDead);
-    
-    if (level === 1) {
-        if (enemiesToSpawnRef.current === 0 && aliveEnemies === 0 && enemiesRef.current.length > 0 && allDead) {
-            setGameState(GameState.VICTORY);
-        }
-    } else if (level === 2 || level === 3) {
-        if (bossSpawnedRef.current && aliveEnemies === 0) {
-             setGameState(GameState.VICTORY);
-        }
-    }
-
+    // Filter dead bullets and enemies
     bulletsRef.current = bulletsRef.current.filter(b => b.active);
     enemiesRef.current = enemiesRef.current.filter(e => !e.isDead);
-    explosionsRef.current.forEach(e => e.stage--);
-    explosionsRef.current = explosionsRef.current.filter(e => e.stage > 0);
 
-  }, [gameState, setGameState, setScore, setEnemiesLeft, level, onPlayerDeath]);
+    // --- Explosion Updates ---
+    explosionsRef.current.forEach(exp => {
+      exp.stage--;
+      if (exp.vx) exp.x += exp.vx;
+      if (exp.vy) exp.y += exp.vy;
+      
+      if (exp.stage <= 0) exp.active = false;
+    });
+    explosionsRef.current = explosionsRef.current.filter(e => e.active);
 
+    // --- Check Level Clear ---
+    if (enemiesToSpawnRef.current === 0 && enemiesRef.current.length === 0) {
+         setGameState(GameState.VICTORY);
+    }
+    
+    setEnemiesLeft(enemiesToSpawnRef.current + enemiesRef.current.length);
 
-  // Draw Loop
+  }, [gameState, level, onPlayerDeath, setEnemiesLeft, setGameState, setScore, setPlayerHp]);
+
+  // --- Draw Function ---
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1525,9 +1743,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const radius = tank.width / 2;
         
         // Phase 2: Stone / Petrification look
-        const isPetrified = tank.phase === 2 && tank.petrifyTimer && tank.petrifyTimer > 0;
+        const isPetrified = tank.phase === 2;
+        const isStunned = tank.stunTimer && tank.stunTimer > 0;
         // Phase 4: Terrifying / Scary look
         const isScary = tank.phase === 4;
+        
+        // Appearing State (Rift)
+        const isAppearing = tank.introState === 'APPEARING';
 
         ctx.save();
         ctx.translate(cx, cy);
@@ -1536,7 +1758,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // Phase 4: Spin or look at movement vector
         let rotation = 0;
         
-        if (isScary) {
+        if (isAppearing) {
+            rotation = 0; // Face right/default during summon
+        } else if (isScary) {
             // In Phase 4, look in movement direction (velocity)
             if (tank.vx !== undefined && tank.vy !== undefined) {
                 rotation = Math.atan2(tank.vy, tank.vx);
@@ -1569,20 +1793,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         for (let i = 0; i < numSnakes; i++) {
             const baseAngle = Math.PI/2 + (Math.PI / (numSnakes-1)) * i;
             
-            // Wiggle
+            // Wiggle logic
             let wiggleOffset = Math.sin(time * 3 + i) * 0.2;
             if (isScary) wiggleOffset = Math.sin(time * 10 + i) * 0.4; // Violent wiggle
-            if (isPetrified) wiggleOffset = 0; // Frozen
-
+            if (isPetrified || isStunned) wiggleOffset = 0; // Frozen
+            
             const currentAngle = baseAngle + wiggleOffset;
             
-            const len = radius * 0.8;
+            // INCREASED HAIR LENGTH (radius * 1.2 instead of 0.8)
+            const len = radius * 1.2; 
             const sx = Math.cos(currentAngle) * (radius * 0.6);
             const sy = Math.sin(currentAngle) * (radius * 0.6);
             const ex = Math.cos(currentAngle) * (radius + len);
             const ey = Math.sin(currentAngle) * (radius + len);
 
-            ctx.strokeStyle = isPetrified ? '#555' : (isScary ? '#1a0500' : '#2E8B57'); 
+            // COLOR LOGIC
+            let snakeColor = '#2E8B57'; // Normal Green
+            if (isPetrified || isStunned) snakeColor = '#555';
+            else if (isScary) snakeColor = '#1a0500';
+
+            ctx.strokeStyle = snakeColor;
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             ctx.beginPath();
@@ -1594,7 +1824,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.stroke();
             
             // Head
-            ctx.fillStyle = isPetrified ? '#444' : (isScary ? '#330000' : '#006400');
+            let headColor = '#006400';
+            if (isPetrified || isStunned) headColor = '#444';
+            else if (isScary) headColor = '#330000';
+
+            ctx.fillStyle = headColor;
             ctx.beginPath();
             ctx.arc(ex, ey, 3, 0, Math.PI*2);
             ctx.fill();
@@ -1602,7 +1836,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // --- Face Base ---
         let faceColor = '#8FBC8F'; // Default green
-        if (isPetrified) faceColor = '#777'; // Stone
+        if (isPetrified || isStunned) faceColor = '#777'; // Stone
         else if (isScary) faceColor = '#2F4F4F'; // Dark Slate (Scary)
         else if (tank.specialState === 'CHARGING') faceColor = '#6B8E23'; 
 
@@ -1614,10 +1848,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // --- Facial Features (Oriented to face Right) ---
         
         // Eyes
-        let eyeColor = '#FFFFE0';
+        let eyeColor = '#FF0000'; // Default Red
         let eyeGlow = 0;
         
-        if (isPetrified) { eyeColor = '#555'; eyeGlow = 0; }
+        if (isPetrified || isStunned) { eyeColor = '#555'; eyeGlow = 0; }
         else if (isScary) { eyeColor = '#FF0000'; eyeGlow = 30; }
         else if (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') { eyeColor = '#FF0000'; eyeGlow = 20; }
         
@@ -1645,7 +1879,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.shadowBlur = 0;
 
         // Mouth
-        ctx.strokeStyle = isPetrified ? '#333' : '#004d00';
+        let mouthColor = '#004d00';
+        if (isPetrified || isStunned) mouthColor = '#333';
+
+        ctx.strokeStyle = mouthColor;
         ctx.lineWidth = 2;
         ctx.beginPath();
         if (isScary) {
@@ -1671,7 +1908,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.ellipse(radius * 0.4, 0, 8, 12, 0, 0, Math.PI*2);
             ctx.fill();
         } else {
-            // Angry Mouth
+            // Angry Mouth (Line)
             ctx.moveTo(radius * 0.4, -radius * 0.15);
             ctx.quadraticCurveTo(radius * 0.5, 0, radius * 0.4, radius * 0.15);
             ctx.stroke();
@@ -1690,49 +1927,39 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             return; // Invisible when dormant (covered by fog)
         }
 
-        // --- AWAKENING ANIMATION (Split Ghosting / Blur / Glitch) ---
-        if (tank.introState === 'AWAKENING') {
-            const shakeX = (Math.random() - 0.5) * 4;
-            const shakeY = (Math.random() - 0.5) * 4;
-            // Oscillating split effect
-            const splitDist = 6 * Math.sin(Date.now() / 50); 
+        // --- APPEARING ANIMATION (Portal Rise) ---
+        if (tank.introState === 'APPEARING') {
+            const timeLeft = tank.introTimer || 0;
+            const progress = 1 - (timeLeft / SALLY_APPEAR_DURATION); // 0 to 1
             
-            // Experimental Blur (Check support)
-            if ((ctx as any).filter) (ctx as any).filter = 'blur(2px)';
-            
-            // Ghost 1 (Cyan/Left)
+            // Draw Portal/Void on ground
             ctx.save();
-            ctx.globalAlpha = 0.6;
-            ctx.fillStyle = '#00FFFF';
-            ctx.globalCompositeOperation = 'screen';
-            ctx.translate(drawX - splitDist + shakeX, drawY + shakeY);
-            ctx.fillRect(0, 0, tank.width, tank.height); // Simplified body
+            ctx.translate(drawX + tank.width/2, drawY + tank.height/2);
+            ctx.scale(progress, progress); // Portal grows
+            ctx.beginPath();
+            ctx.ellipse(0, 0, tank.width * 0.8, tank.height * 0.3, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#1a001a'; // Dark void
+            ctx.fill();
+            ctx.strokeStyle = '#4b0082'; // Indigo glow
+            ctx.lineWidth = 2;
+            ctx.stroke();
             ctx.restore();
 
-            // Ghost 2 (Red/Right)
-            ctx.save();
-            ctx.globalAlpha = 0.6;
-            ctx.fillStyle = '#FF0000';
-            ctx.globalCompositeOperation = 'screen';
-            ctx.translate(drawX + splitDist + shakeX, drawY + shakeY);
-            ctx.fillRect(0, 0, tank.width, tank.height); // Simplified body
-            ctx.restore();
-            
-            // Reset filter for main body
-            if ((ctx as any).filter) (ctx as any).filter = 'none';
-            
-            // Main Body with slight transparency and shake
-            ctx.globalAlpha = 0.9;
-            drawX += shakeX;
-            drawY += shakeY;
+            // Adjust Tank drawing parameters for rising effect
+            ctx.globalAlpha = progress; // Fade in
+            const riseOffset = (1 - progress) * 20; // Rise from below (20px)
+            drawY += riseOffset;
         }
 
         // --- SALLY SPECIAL RENDER ---
         if (tank.id === 'SALLY') {
             // Draw Tank Chassis under Medusa
             // Reuse standard tank drawing logic but specialized color
-            const isPetrified = tank.phase === 2 && tank.petrifyTimer && tank.petrifyTimer > 0;
-            const chassisColor = isPetrified ? '#555' : (tank.phase === 4 ? '#220000' : '#4b5320'); // Dark red in phase 4
+            const isPetrified = tank.phase === 2;
+            const isStunned = tank.stunTimer && tank.stunTimer > 0;
+
+            let chassisColor = (tank.phase === 4 ? '#220000' : '#4b5320'); // Dark red or olive
+            if (isPetrified || isStunned) chassisColor = '#555';
 
             ctx.save();
             // Translate for tank chassis
@@ -1744,22 +1971,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             // In Phase 4, rotate to movement
             let chassisRot = 0;
             if (tank.phase === 4 && tank.vx !== undefined && tank.vy !== undefined) {
-                 chassisRot = Math.atan2(tank.vy, tank.vx) + Math.PI/2; // Base tank faces UP usually, standard drawing expects UP
-                 // Standard drawing logic below is axis aligned. We might need to rotate context.
-                 // Actually, standard drawing relies on tank.direction.
-                 // Let's just draw the chassis rects rotated manually here.
-                 ctx.rotate(chassisRot - Math.PI/2); // Align right to 0
+                 chassisRot = Math.atan2(tank.vy, tank.vx) + Math.PI/2; 
+                 ctx.rotate(chassisRot - Math.PI/2); 
+            } else {
+                 // Standard Axis Aligned rotation based on direction
+                 if(tank.direction === Direction.RIGHT) chassisRot = 0;
+                 else if(tank.direction === Direction.DOWN) chassisRot = Math.PI / 2;
+                 else if(tank.direction === Direction.LEFT) chassisRot = Math.PI;
+                 else if(tank.direction === Direction.UP) chassisRot = -Math.PI / 2;
+                 
+                 ctx.rotate(chassisRot);
             }
 
-            // Simple chassis rect
+            // Simple chassis rect (drawn as if facing RIGHT because we rotate)
+            // Original code drew vertically, let's adapt standard shape to rotate
+            // Base shape (horizontal)
             ctx.fillStyle = chassisColor;
             ctx.fillRect(-tank.width/2 + 2, -tank.height/2 + 2, tank.width - 4, tank.height - 4);
             
-            // Treads
+            // Treads (Top and Bottom when facing right)
             ctx.fillStyle = '#111';
-            // Left Tread
             ctx.fillRect(-tank.width/2, -tank.height/2, tank.width, 6);
-            // Right Tread
             ctx.fillRect(-tank.width/2, tank.height/2 - 6, tank.width, 6);
             
             ctx.restore();
@@ -1794,6 +2026,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                  ctx.strokeStyle = '#FFFFFF';
                  ctx.stroke();
                  ctx.restore();
+            }
+            
+            // Reset Alpha from APPEARING
+            if (tank.introState === 'APPEARING') {
+                ctx.globalAlpha = 1;
             }
             return;
         }
@@ -1850,8 +2087,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     };
 
     if (!playerRef.current.isDead) {
-        // Flash player if low health (1 HP)
-        if (playerRef.current.hp > 1 || Math.floor(Date.now() / 100) % 2 === 0) {
+        // Flash player if low health (1 HP) or Invulnerable (blink fast)
+        // If invulnerable, flicker every 4 frames (2 on, 2 off)
+        const isInvulnerable = playerRef.current.invulnerabilityTimer && playerRef.current.invulnerabilityTimer > 0;
+        const shouldDraw = isInvulnerable 
+                           ? Math.floor(playerRef.current.invulnerabilityTimer / 2) % 2 === 0
+                           : (playerRef.current.hp > 1 || Math.floor(Date.now() / 100) % 2 === 0);
+
+        if (shouldDraw) {
             drawTank(playerRef.current, COLORS.PLAYER);
         }
     }
@@ -1902,6 +2145,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
             ctx.restore();
             
+        } else if (b.variant === 'red_snake') {
+            // Draw Small Red Orb
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.arc(b.x + b.width/2, b.y + b.height/2, b.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowColor = '#FF0000';
+            ctx.shadowBlur = 5;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        } else if (b.variant === 'moon_disc') {
+            // Draw Moon Disc
+            ctx.fillStyle = '#E0F7FA'; // Pale Cyan/White
+            const cx = b.x + b.width/2;
+            const cy = b.y + b.height/2;
+            
+            ctx.save();
+            ctx.shadowColor = '#00FFFF';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(cx, cy, b.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Crescent effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(cx - 2, cy - 2, b.width/2 - 1, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
         } else {
             ctx.fillStyle = COLORS.BULLET;
             ctx.beginPath();
@@ -1909,60 +2182,63 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         }
     });
 
-    explosionsRef.current.forEach(e => {
-        if ((e as any).type === 'heal') {
+    explosionsRef.current.forEach(exp => {
+        if ((exp as any).type === 'heal') {
             // Draw healing text
             ctx.fillStyle = '#00FF00'; // Green
             ctx.font = "12px 'Press Start 2P'";
-            ctx.fillText("HEAL", e.x, e.y - (20 - e.stage));
-        } else if ((e as any).type === 'smoke') {
+            ctx.fillText("HEAL", exp.x, exp.y - (20 - exp.stage));
+        } else if ((exp as any).type === 'smoke') {
             // Draw gray smoke
-            ctx.fillStyle = `rgba(150, 150, 150, ${e.stage / 23})`; // Slower fade (divide by maxStage)
-            const size = (23 - e.stage) * 2; // Adjusted size growth for longer duration
+            ctx.fillStyle = `rgba(150, 150, 150, ${exp.stage / 23})`; // Slower fade (divide by maxStage)
+            const size = (23 - exp.stage) * 2; // Adjusted size growth for longer duration
             ctx.beginPath();
-            ctx.arc(e.x, e.y, size, 0, Math.PI * 2);
+            ctx.arc(exp.x, exp.y, Math.max(0, size), 0, Math.PI * 2);
             ctx.fill();
-        } else if ((e as any).type === 'boss_aura') {
+        } else if ((exp as any).type === 'boss_aura') {
             // Boss Aura Particles
-            const alpha = e.stage / 30;
+            const alpha = exp.stage / 30;
             ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`; // Black core
             ctx.beginPath();
-            ctx.arc(e.x, e.y, (30 - e.stage)/2, 0, Math.PI * 2);
+            const size = (30 - exp.stage)/2;
+            ctx.arc(exp.x, exp.y, Math.max(0, size), 0, Math.PI * 2);
             ctx.fill();
             // Red Outline
             ctx.strokeStyle = `rgba(200, 0, 0, ${alpha})`;
             ctx.lineWidth = 1;
             ctx.stroke();
-        } else if ((e as any).type === 'fire') {
+        } else if ((exp as any).type === 'fire') {
             // Fire Particles (Sally)
-            const alpha = e.stage / 30;
+            const alpha = exp.stage / 30;
             // Gradient from Yellow -> Orange -> Red
-            const lifeRatio = e.stage / 30; // 1.0 -> 0.0
+            const lifeRatio = exp.stage / 30; // 1.0 -> 0.0
             if (lifeRatio > 0.7) ctx.fillStyle = `rgba(255, 255, 0, ${alpha})`; // Yellow
             else if (lifeRatio > 0.3) ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`; // Orange
             else ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`; // Red
             
+            const size = (30 - exp.stage)/3 + 2;
             ctx.beginPath();
-            ctx.arc(e.x, e.y, (30 - e.stage)/3 + 2, 0, Math.PI * 2);
+            ctx.arc(exp.x, exp.y, Math.max(0, size), 0, Math.PI * 2);
             ctx.fill();
-        } else if ((e as any).type === 'glitch') {
+        } else if ((exp as any).type === 'glitch') {
             // Glitch Rectangles
-            ctx.fillStyle = (e as any).color || '#00FF00';
-            const size = (e.stage / 5) * 20; // Scale with life
-            ctx.fillRect(e.x, e.y, size, size/4);
-        } else if ((e as any).type === 'impact') {
+            ctx.fillStyle = (exp as any).color || '#00FF00';
+            const size = (exp.stage / 5) * 20; // Scale with life
+            ctx.fillRect(exp.x, exp.y, size, size/4);
+        } else if ((exp as any).type === 'impact') {
             // Big impact explosion
-            ctx.fillStyle = `rgba(50, 20, 0, ${e.stage / 15})`;
+            ctx.fillStyle = `rgba(50, 20, 0, ${exp.stage / 15})`;
+            const size = (20 - exp.stage) * 8;
             ctx.beginPath();
-            ctx.arc(e.x, e.y, (20 - e.stage) * 8, 0, Math.PI * 2);
+            ctx.arc(exp.x, exp.y, Math.max(0, size), 0, Math.PI * 2);
             ctx.fill();
-        } else if ((e as any).type === 'laser_trace') {
+        } else if ((exp as any).type === 'laser_trace') {
             // Laser Trace (Fading Red Line)
-            const alpha = e.stage / SALLY_LASER_TRACE_DURATION;
-            const cx = e.x;
-            const cy = e.y;
+            const alpha = exp.stage / SALLY_LASER_TRACE_DURATION;
+            const cx = exp.x;
+            const cy = exp.y;
             const length = 1000;
-            const angle = (e as any).angle || 0;
+            const angle = (exp as any).angle || 0;
             const lx = cx + Math.cos(angle) * length;
             const ly = cy + Math.sin(angle) * length;
 
@@ -1983,11 +2259,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.stroke();
             ctx.restore();
         } else {
-            ctx.fillStyle = `rgba(255, 69, 0, ${e.stage / 10})`;
-            const center = { x: e.x + 14, y: e.y + 14 };
-            const size = (10 - e.stage) * 4;
+            // Generic Explosion Square fallback
+            ctx.fillStyle = `rgba(255, 69, 0, ${exp.stage / 10})`;
+            const center = { x: exp.x + 14, y: exp.y + 14 };
+            const size = (10 - exp.stage) * 4;
             ctx.fillRect(center.x - size/2, center.y - size/2, size, size);
-            ctx.fillStyle = `rgba(255, 255, 0, ${e.stage / 10})`;
+            ctx.fillStyle = `rgba(255, 255, 0, ${exp.stage / 10})`;
             const innerSize = size / 2;
             ctx.fillRect(center.x - innerSize/2, center.y - innerSize/2, innerSize, innerSize);
         }
@@ -2013,90 +2290,92 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const barHeight = 16;
         const barX = (CANVAS_WIDTH - barWidth) / 2;
         const barY = 30; // Top of screen
-        const isEnraged = boss.hp <= boss.maxHp / 2;
-        const isDefended = boss.defenseBuffTimer && boss.defenseBuffTimer > 0;
-        // Phase 2 Petrified
-        const isPetrified = boss.phase === 2 && boss.petrifyTimer && boss.petrifyTimer > 0;
-
-        // Boss Name
-        ctx.fillStyle = '#FFF';
-        ctx.font = "16px 'Press Start 2P'";
-        ctx.textAlign = 'center';
         
-        let bossName = "JUGGERNAUT";
+        // Determine Color based on Phase
+        let fillColor = '#8B0000';
+        const time = Date.now();
+        
         if (boss.id === 'SALLY') {
-             if (boss.phase === 4) bossName = "SALLY (RAGE)";
-             else if (isPetrified) bossName = "SALLY (PETRIFIED)";
-             else bossName = "SALLY";
+            switch (boss.phase) {
+                case 1:
+                    fillColor = '#8B0000';
+                    break;
+                case 2: // Petrified
+                    fillColor = '#78909C'; // Stone Blue-Grey
+                    // Slow pulse to white
+                    const p2 = (Math.sin(time * 0.005) + 1) / 2; // 0 to 1
+                    fillColor = blendColors('#78909C', '#B0BEC5', p2 * 0.5);
+                    break;
+                case 3: // Laser (Purple)
+                    fillColor = '#800080';
+                    // Fast Pulse
+                    const p3 = (Math.sin(time * 0.015) + 1) / 2;
+                    fillColor = blendColors('#800080', '#FF00FF', p3 * 0.7);
+                    break;
+                case 4: // Frenzy (Red/Black)
+                    // Strobe
+                    fillColor = Math.floor(time / 50) % 2 === 0 ? '#FF0000' : '#220000';
+                    break;
+                default:
+                    fillColor = '#8B0000';
+            }
+        } else {
+             // Juggernaut
+             const isEnraged = boss.hp <= boss.maxHp / 2;
+             fillColor = isEnraged ? '#FF4500' : '#8B0000';
         }
         
-        ctx.fillText(bossName, CANVAS_WIDTH / 2, barY - 10);
-
-        // Background
-        ctx.fillStyle = '#330000';
+        // Override for generic defense buff (if not phase 2 sally which covers it)
+        if (boss.defenseBuffTimer && boss.defenseBuffTimer > 0 && boss.phase !== 2) {
+             fillColor = '#555555';
+        }
+        
+        // Draw Health Bar Background
+        ctx.fillStyle = '#000000';
         ctx.fillRect(barX, barY, barWidth, barHeight);
         
-        // Health
-        const hpPercent = boss.hp / boss.maxHp;
+        // Draw Health Bar Fill
+        const hpPercent = Math.max(0, boss.hp / boss.maxHp);
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(barX + 2, barY + 2, (barWidth - 4) * hpPercent, barHeight - 4);
         
-        // Color Logic
-        const time = Date.now();
-        const pulse = Math.abs(Math.sin(time / 200)); // 0 to 1
-        
-        if (isPetrified) {
-            // Stone Grey Texture
-            ctx.fillStyle = '#666'; 
-            ctx.shadowBlur = 0;
-        } else if (isDefended) {
-            // Steel / Silver Pulse for Defense
-            const val = 100 + Math.floor(pulse * 155); // 100 to 255
-            ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
-            ctx.shadowColor = '#FFFFFF';
-            ctx.shadowBlur = 10 + pulse * 5;
-        } else if (isEnraged) {
-            // Enraged Pulse
-            const r = 255;
-            const g = Math.floor(pulse * 150); // 0 to 150
-            const b = 0;
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            // Fire Glow
-            ctx.shadowColor = `rgb(255, ${Math.floor(pulse * 100)}, 0)`;
-            ctx.shadowBlur = 10 + pulse * 10;
-        } else {
-            // Standard Red
-            ctx.fillStyle = '#ff0000';
-            ctx.shadowBlur = 0;
-        }
-
-        ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
-        ctx.shadowBlur = 0; // Reset shadow for border
-        
-        // Border
-        ctx.strokeStyle = '#AAA';
+        // Draw Border
+        ctx.strokeStyle = '#FFFFFF';
         ctx.lineWidth = 2;
         ctx.strokeRect(barX, barY, barWidth, barHeight);
-    }
 
-  }, [level]);
+        // Draw Boss Name
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(boss.id === 'SALLY' ? 'MEDUSA' : 'JUGGERNAUT', CANVAS_WIDTH / 2, barY - 10);
+    }
+  }, [gameState]);
 
   useEffect(() => {
-    let animationFrameId: number;
+    let animationId: number;
     const loop = () => {
       update();
       draw();
-      animationFrameId = requestAnimationFrame(loop);
+      animationId = window.requestAnimationFrame(loop);
     };
-    if (gameState === GameState.PLAYING) animationFrameId = requestAnimationFrame(loop);
-    else draw();
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [gameState, update, draw]);
+    
+    if (gameState === GameState.PLAYING || gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) {
+        loop();
+    } else {
+        draw(); // Draw once for menu background
+    }
+
+    return () => window.cancelAnimationFrame(animationId);
+  }, [update, draw, gameState]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={CANVAS_WIDTH}
-      height={CANVAS_HEIGHT}
-      className="bg-black"
+    <canvas 
+        ref={canvasRef} 
+        width={CANVAS_WIDTH} 
+        height={CANVAS_HEIGHT}
+        className="block bg-black image-pixelated"
+        style={{ imageRendering: 'pixelated' }}
     />
   );
 };

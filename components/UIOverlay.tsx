@@ -92,7 +92,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     };
   }, [gameState, startGame, level, setLevel, isGameInProgress, setGameState, unlockedLevel, resumeGame, inputLocked, gameOverSelection]);
 
-  const ESTUS_PRICE = 20;
+  const isBoneActive = boneUnlocked && unlockedLevel >= 3;
+  const ESTUS_PRICE = isBoneActive ? 0 : 20; 
   const DARKSIGN_PRICE = 999;
 
   // Helper to render level buttons
@@ -232,7 +233,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
                 <div className="flex flex-col items-center mt-2">
                     <div className="text-orange-400 font-serif text-xs mb-1 tracking-wide">Estus Flask</div>
-                    <div className="text-gray-500 text-[8px] text-center leading-tight">An emerald flask...</div>
+                    <div className="text-gray-500 text-[8px] text-center leading-tight">
+                        {isBoneActive ? 'Infinite healing...' : 'Heal (3 Charges)'}
+                    </div>
                 </div>
                 <div className="h-6 flex items-center justify-center w-full mt-1">
                     {estusUnlocked ? (
@@ -265,7 +268,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 
                 <div className="flex flex-col items-center mt-2">
                     <div className="text-gray-300 font-serif text-xs mb-1 tracking-wide">Bone</div>
-                    <div className="text-gray-500 text-[8px] text-center leading-tight">Unlock all levels</div>
+                    <div className="text-gray-500 text-[8px] text-center leading-tight">Unlock all levels & Infinite Estus</div>
                 </div>
                 
                 <div className="h-6 flex items-center justify-center w-full mt-1">
