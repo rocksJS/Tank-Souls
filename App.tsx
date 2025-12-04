@@ -54,7 +54,12 @@ const App: React.FC = () => {
                  />
              </div>
              
-             <Sidebar enemiesLeft={enemiesLeft} score={score} level={level} />
+             <Sidebar 
+                enemiesLeft={enemiesLeft} 
+                score={score} 
+                level={level} 
+                setGameState={setGameState}
+             />
         </div>
         
         {/* Decorative details */}

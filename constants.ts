@@ -41,7 +41,7 @@ export const INITIAL_MAP_LAYOUT = LEVEL_1;
 
 export const COLORS = {
   BACKGROUND: '#000000',
-  BRICK: '#C84C0C',
+  BRICK: '#333333', // Dark Gray for Souls theme
   STEEL: '#C0C0C0', 
   WATER: '#0000FF', 
   GRASS: '#006400',

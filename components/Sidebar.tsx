@@ -1,18 +1,16 @@
 import React from 'react';
+import { GameState } from '../types';
 
 interface SidebarProps {
   enemiesLeft: number;
   score: number;
   level: number;
+  setGameState: (state: GameState) => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level }) => {
-  // Create an array of 20 items to represent the enemy grid
-  // We fill the ones that are 'left' with a specific icon, others empty or different
-  // The original game counts down by removing icons.
-  
+const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameState }) => {
   return (
-    <div className="h-full bg-[#636363] p-4 flex flex-col items-center font-mono border-l-4 border-gray-700 min-w-[200px]">
+    <div className="h-full bg-[#1a1a1a] p-4 flex flex-col items-center font-mono border-l-4 border-[#333] min-w-[200px]">
       
       {/* Enemy Icons Grid */}
       <div className="mb-8 w-full">
@@ -20,7 +18,7 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level }) => {
           {Array.from({ length: 20 }).map((_, i) => (
              <div key={i} className={`w-6 h-6 ${i < enemiesLeft ? 'opacity-100' : 'opacity-0'}`}>
                 {/* Simple Tank Icon */}
-                <svg viewBox="0 0 24 24" className="w-full h-full fill-black">
+                <svg viewBox="0 0 24 24" className="w-full h-full fill-[#888]">
                    <rect x="2" y="4" width="4" height="16" />
                    <rect x="18" y="4" width="4" height="16" />
                    <rect x="6" y="6" width="12" height="12" />
@@ -32,22 +30,21 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level }) => {
       </div>
 
       {/* Player Lives */}
-      <div className="mb-8 text-black font-bold text-xl flex flex-col items-start w-full px-4">
+      <div className="mb-8 text-gray-400 font-bold text-xl flex flex-col items-start w-full px-4">
         <div className="flex items-center mb-2">
-            <span className="mr-2">I</span>
-            <span className="text-sm">P</span>
+            <span className="mr-2 text-xs">IP</span>
         </div>
         <div className="flex items-center">
-            <div className="w-6 h-6 mr-2 bg-yellow-500 rounded-sm"></div>
-            <span>3</span> {/* Hardcoded lives for now as state isn't tracked fully */}
+            <div className="w-6 h-6 mr-2 bg-yellow-600 rounded-sm opacity-80"></div>
+            <span>3</span>
         </div>
       </div>
 
       {/* Stage Number */}
-      <div className="mb-auto text-black font-bold text-xl flex flex-col items-start w-full px-4">
+      <div className="mb-auto text-gray-400 font-bold text-xl flex flex-col items-start w-full px-4">
          <div className="w-8 h-8 mb-2">
             {/* Flag Icon */}
-            <svg viewBox="0 0 24 24" className="w-full h-full fill-black">
+            <svg viewBox="0 0 24 24" className="w-full h-full fill-gray-500">
                <path d="M4 2v20h2V14h12l-2-4 2-4H6V2z" />
             </svg>
          </div>
@@ -56,10 +53,17 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level }) => {
          </div>
       </div>
 
-      {/* Score (Custom Addition for UX) */}
-      <div className="mt-4 border-t-2 border-black w-full pt-2 text-center">
-          <div className="text-black text-xs mb-1">SCORE</div>
-          <div className="text-yellow-300 font-bold bg-black px-2 py-1 rounded">{score}</div>
+      {/* Score */}
+      <div className="mt-4 border-t-2 border-[#444] w-full pt-4 text-center">
+          <div className="text-gray-500 text-[10px] mb-2 tracking-widest uppercase">Soul Memory</div>
+          <div className="text-yellow-600 font-bold bg-black border border-[#333] px-2 py-1 rounded mb-4">{score}</div>
+          
+          <button 
+            onClick={() => setGameState(GameState.MENU)}
+            className="w-full py-2 bg-[#333] hover:bg-[#444] text-gray-300 text-[10px] uppercase font-bold tracking-wider rounded border border-[#555] transition-colors"
+          >
+            Main Menu
+          </button>
       </div>
 
     </div>
