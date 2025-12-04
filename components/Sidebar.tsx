@@ -6,11 +6,9 @@ interface SidebarProps {
   score: number;
   level: number;
   setGameState: (state: GameState) => void;
-  estusUnlocked: boolean;
-  estusCharges: number;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameState, estusUnlocked, estusCharges }) => {
+const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameState }) => {
   return (
     <div className="h-full bg-[#1a1a1a] p-4 flex flex-col items-center font-mono border-l-4 border-[#333] min-w-[200px]">
       
@@ -41,21 +39,6 @@ const Sidebar: React.FC<SidebarProps> = ({ enemiesLeft, score, level, setGameSta
             <span>3</span>
         </div>
       </div>
-
-      {/* Estus Flask HUD */}
-      {estusUnlocked && (
-          <div className="mb-8 text-gray-400 font-bold text-xl flex flex-col items-start w-full px-4">
-            <div className="flex items-center mb-2">
-                <span className="mr-2 text-xs text-orange-400">ESTUS [R]</span>
-            </div>
-            <div className="flex items-center">
-                <div className="w-4 h-6 mr-3 bg-gray-800 rounded-b-md border border-gray-500 relative overflow-hidden">
-                    <div className="absolute bottom-0 w-full bg-orange-500 transition-all duration-300" style={{ height: `${(estusCharges / 3) * 100}%` }}></div>
-                </div>
-                <span>{estusCharges}</span>
-            </div>
-          </div>
-      )}
 
       {/* Stage Number */}
       <div className="mb-auto text-gray-400 font-bold text-xl flex flex-col items-start w-full px-4">

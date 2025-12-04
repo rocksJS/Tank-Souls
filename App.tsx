@@ -79,6 +79,7 @@ const App: React.FC = () => {
                     gameState={gameState} 
                     setGameState={setGameState}
                     score={score} 
+                    setScore={setScore}
                     enemiesLeft={enemiesLeft}
                     startGame={startGame}
                     resumeGame={resumeGame}
@@ -97,8 +98,6 @@ const App: React.FC = () => {
                 score={score} 
                 level={level} 
                 setGameState={setGameState}
-                estusUnlocked={estusUnlocked}
-                estusCharges={estusCharges}
              />
         </div>
         

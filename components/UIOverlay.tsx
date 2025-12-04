@@ -5,6 +5,7 @@ interface UIOverlayProps {
   gameState: GameState;
   setGameState: (state: GameState) => void;
   score: number;
+  setScore: React.Dispatch<React.SetStateAction<number>>;
   enemiesLeft: number;
   startGame: () => void;
   resumeGame: () => void;
@@ -18,7 +19,7 @@ interface UIOverlayProps {
 }
 
 const UIOverlay: React.FC<UIOverlayProps> = ({ 
-    gameState, setGameState, score, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress, deathCount,
+    gameState, setGameState, score, setScore, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress, deathCount,
     estusUnlocked, setEstusUnlocked
 }) => {
   
@@ -51,6 +52,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         window.removeEventListener('keydown', handleKeyDown);
     };
   }, [gameState, startGame, level, setLevel, isGameInProgress, setGameState]);
+
+  const ESTUS_PRICE = 20;
 
   return (
     <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col items-center justify-center font-serif">
@@ -149,27 +152,53 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
              <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-gray-700"></div>
              
              {/* Estus Flask Item */}
-             <div className="flex flex-col items-center p-4 border border-gray-800 hover:border-orange-900/50 bg-gray-900/30 transition-colors w-32">
-                {/* Visual Flask */}
-                <div className="w-8 h-10 bg-gray-800 rounded-b-xl border-2 border-gray-600 relative overflow-hidden mb-2 shadow-[0_0_10px_rgba(255,165,0,0.2)]">
-                    <div className="absolute top-0 w-full h-1 bg-gray-700"></div>
-                    <div className="absolute bottom-0 w-full h-3/4 bg-gradient-to-t from-orange-600 to-yellow-500 animate-pulse opacity-90"></div>
-                    <div className="absolute top-1/2 left-1/2 w-4 h-4 bg-orange-300 rounded-full blur-md opacity-50 transform -translate-x-1/2 -translate-y-1/2"></div>
+             <div className="flex flex-col items-center p-4 border border-gray-800 hover:border-orange-900/50 bg-gray-900/30 transition-colors w-32 h-44 justify-between">
+                
+                {/* Visual Flask - Authentic Design */}
+                <div className="w-12 h-16 relative flex justify-center items-end shrink-0 drop-shadow-[0_0_5px_rgba(255,165,0,0.5)]">
+                    {/* Neck */}
+                    <div className="absolute top-0 w-4 h-8 bg-yellow-900/30 border-2 border-yellow-700 rounded-t-sm z-10 overflow-hidden">
+                        <div className="absolute bottom-0 w-full h-full bg-gradient-to-t from-orange-500 to-yellow-500 opacity-80 animate-pulse"></div>
+                    </div>
+                    {/* Rim */}
+                    <div className="absolute top-[-2px] w-6 h-2 bg-yellow-800 rounded-full border border-yellow-600 z-20 shadow-md"></div>
+                    
+                    {/* Body */}
+                    <div className="w-10 h-10 bg-yellow-900/30 border-2 border-yellow-700 rounded-full relative overflow-hidden z-10 shadow-inner">
+                         {/* Liquid */}
+                         <div className="w-full h-full bg-gradient-to-t from-orange-700 via-orange-500 to-yellow-400 opacity-90 animate-[pulse_3s_infinite]"></div>
+                         {/* Specular Highlight */}
+                         <div className="absolute top-2 left-2 w-3 h-2 bg-yellow-100 rounded-full blur-[2px] opacity-40"></div>
+                    </div>
                 </div>
                 
-                <div className="text-orange-400 font-serif text-xs mb-1">Эстус</div>
-                <div className="text-gray-500 text-[10px] mb-2 text-center leading-tight">Heal 1 HP (3 charges)</div>
+                <div className="flex flex-col items-center mt-2">
+                    <div className="text-orange-400 font-serif text-sm mb-1 tracking-wide">Estus Flask</div>
+                    <div className="text-gray-500 text-[9px] text-center leading-tight">Heal 1 HP (3 charges)</div>
+                </div>
                 
-                {estusUnlocked ? (
-                    <div className="text-[10px] text-green-600 font-bold uppercase tracking-widest">Owned</div>
-                ) : (
-                    <button 
-                        onClick={() => setEstusUnlocked(true)}
-                        className="text-[10px] bg-gray-800 hover:bg-orange-900 text-gray-300 px-2 py-1 border border-gray-600"
-                    >
-                        Buy (0)
-                    </button>
-                )}
+                <div className="h-6 flex items-center justify-center w-full mt-1">
+                    {estusUnlocked ? (
+                        <div className="text-[10px] text-green-600 font-bold uppercase tracking-widest">Owned</div>
+                    ) : (
+                        <button 
+                            onClick={() => {
+                                if (score >= ESTUS_PRICE) {
+                                    setScore(prev => prev - ESTUS_PRICE);
+                                    setEstusUnlocked(true);
+                                }
+                            }}
+                            disabled={score < ESTUS_PRICE}
+                            className={`text-[10px] px-2 py-1 border transition-all duration-300 w-full ${
+                                score >= ESTUS_PRICE 
+                                ? 'bg-gray-800 hover:bg-orange-900 text-gray-300 border-gray-600 hover:border-orange-500 cursor-pointer' 
+                                : 'bg-gray-900 text-gray-600 border-gray-800 cursor-not-allowed opacity-50'
+                            }`}
+                        >
+                            Buy ({ESTUS_PRICE})
+                        </button>
+                    )}
+                </div>
              </div>
           </div>
 
