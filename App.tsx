@@ -40,7 +40,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
+    <div className="min-h-screen flex justify-center pt-32 pb-12">
       <div className="relative">
         <div className="relative border-[4px] border-[#333] rounded shadow-[0_0_50px_rgba(0,0,0,0.8)] bg-[#1a1a1a] flex">
              {/* TV Scanline effect (subtler for Tank Souls) */}

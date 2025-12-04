@@ -46,7 +46,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
 
   const playerRef = useRef<Tank>({
     x: spawnX,
-    y: 12 * TILE_SIZE + (TILE_SIZE - TANK_SIZE) / 2,
+    y: (GRID_HEIGHT - 1) * TILE_SIZE + (TILE_SIZE - TANK_SIZE) / 2,
     width: TANK_SIZE,
     height: TANK_SIZE,
     direction: Direction.UP,
@@ -94,7 +94,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
 
     playerRef.current = {
       x: sX,
-      y: 12 * TILE_SIZE + (TILE_SIZE - TANK_SIZE) / 2,
+      y: (GRID_HEIGHT - 1) * TILE_SIZE + (TILE_SIZE - TANK_SIZE) / 2,
       width: TANK_SIZE,
       height: TANK_SIZE,
       direction: Direction.UP,
