@@ -28,14 +28,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 }) => {
   
   const [inputLocked, setInputLocked] = useState(false);
+  const [gameOverSelection, setGameOverSelection] = useState<0 | 1>(0); // 0: Try Again, 1: Menu
 
   // Manage Input Lockout on Death
   useEffect(() => {
     if (gameState === GameState.GAME_OVER) {
         setInputLocked(true);
+        setGameOverSelection(0); // Reset selection
         const timer = setTimeout(() => {
             setInputLocked(false);
-        }, 1500); // 1.5s delay before allowing restart
+        }, 500); // 0.5s delay before allowing restart
         return () => clearTimeout(timer);
     }
   }, [gameState]);
@@ -53,10 +55,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             }
         }
 
+        if (gameState === GameState.GAME_OVER) {
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') setGameOverSelection(0);
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') setGameOverSelection(1);
+        }
+
         if (e.code === 'Space' || e.code === 'Enter') {
             if (gameState === GameState.GAME_OVER) {
                 if (!inputLocked) {
-                    startGame();
+                    if (gameOverSelection === 0) startGame();
+                    else setGameState(GameState.MENU);
                 }
             } else if (gameState === GameState.MENU) {
                 if (isGameInProgress) {
@@ -82,7 +90,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     return () => {
         window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [gameState, startGame, level, setLevel, isGameInProgress, setGameState, unlockedLevel, resumeGame, inputLocked]);
+  }, [gameState, startGame, level, setLevel, isGameInProgress, setGameState, unlockedLevel, resumeGame, inputLocked, gameOverSelection]);
 
   const ESTUS_PRICE = 20;
   const DARKSIGN_PRICE = 999;
@@ -358,13 +366,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           <div className={`flex flex-col gap-4 items-center transition-opacity duration-500 ${inputLocked ? 'opacity-0' : 'opacity-100'}`}>
              <button
                onClick={() => { if(!inputLocked) startGame() }}
-               className="px-8 py-2 text-gray-400 hover:text-white hover:bg-white/5 border-t border-b border-transparent hover:border-gray-600 transition-all duration-300 font-serif tracking-widest uppercase text-sm"
+               className={`px-8 py-2 border-t border-b border-transparent transition-all duration-300 font-serif tracking-widest uppercase text-sm flex items-center gap-2 ${
+                   gameOverSelection === 0 ? 'text-white border-gray-600 bg-white/5 scale-110' : 'text-gray-400 hover:text-white'
+               }`}
              >
                Try Again
              </button>
              <button
                 onClick={() => setGameState(GameState.MENU)}
-                className="px-8 py-2 text-gray-600 hover:text-gray-400 font-serif tracking-widest uppercase text-xs"
+                className={`px-8 py-2 font-serif tracking-widest uppercase text-xs flex items-center gap-2 ${
+                   gameOverSelection === 1 ? 'text-white scale-110' : 'text-gray-600 hover:text-gray-400'
+               }`}
               >
                 Return to Menu
               </button>

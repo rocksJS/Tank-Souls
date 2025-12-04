@@ -24,6 +24,17 @@ import {
   GLASSCANNON_SIZE,
   GLASSCANNON_SPEED_FACTOR,
   BOSS_RAGE_SPEED_MULT,
+  SALLY_SIZE,
+  SALLY_HP,
+  SALLY_SPEED,
+  SALLY_LASER_COOLDOWN,
+  SALLY_PRE_CHARGE,
+  SALLY_CHARGE,
+  SALLY_LASER_DURATION,
+  SALLY_LASER_WIDTH,
+  SALLY_LASER_TRACE_DURATION,
+  SALLY_SHOTGUN_BURST_DELAY,
+  SALLY_SHOTGUN_BULLET_COUNT
 } from '../constants';
 import {
   Direction,
@@ -90,9 +101,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const bossDashTimerRef = useRef<number>(0);
   const bossDashVectorRef = useRef<{x: number, y: number}>({x: 0, y: 0});
   
-  // Intro / Fog Refs
-  const hasBossCraterRef = useRef<boolean>(false);
-  
   // Use a ref to track current charges inside the game loop to avoid stale closures,
   // but we also need to update the parent state.
   const estusChargesRef = useRef<number>(estusCharges);
@@ -114,8 +122,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Initialize Tile HP Grid
     const newTileHp = Array(GRID_HEIGHT).fill(0).map(() => Array(GRID_WIDTH).fill(0));
 
-    // Explicitly set base and walls ONLY for Standard Levels (1 and 3)
-    if (level === 1 || level === 3) {
+    // Explicitly set base and walls ONLY for Level 1
+    if (level === 1) {
         const centerX = Math.floor(GRID_WIDTH / 2);
         const gridY = GRID_HEIGHT - 1;
         newMap[gridY][centerX] = TileType.BASE;
@@ -127,6 +135,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     } else if (level === 2) {
        // Level 2 Setup
        setEnemiesLeft(1); // Only JUGG left
+    } else if (level === 3) {
+       // Level 3 Setup - Sally
+       setEnemiesLeft(1); // Only Sally left
     }
 
     // Set HP values based on map
@@ -165,20 +176,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     explosionsRef.current = [];
     baseActiveRef.current = true;
     enemySpawnTimerRef.current = 0;
-    // For level 2, we manage spawning manually
-    enemiesToSpawnRef.current = level === 2 ? 0 : 20; 
+    // For level 2 and 3, we manage spawning manually
+    enemiesToSpawnRef.current = (level === 2 || level === 3) ? 0 : 20; 
     moveKeysRef.current = [];
     setScore(0);
     bossSpecialTimerRef.current = 0;
     bossDashTimerRef.current = 0;
     bossDashVectorRef.current = {x: 0, y: 0};
-    hasBossCraterRef.current = false;
 
-    // Spawn Boss Immediately for Level 2 (But Hidden initially)
+    // Spawn Boss Immediately for Level 2 (DORMANT state)
     if (level === 2) {
          enemiesRef.current.push({
             x: (GRID_WIDTH / 2) * TILE_SIZE - BOSS_SIZE / 2,
-            y: TILE_SIZE * 2, // Target landing spot
+            y: TILE_SIZE * 2, // Starts at landing spot
             width: BOSS_SIZE,
             height: BOSS_SIZE,
             direction: Direction.DOWN,
@@ -189,13 +199,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             isDead: false,
             hp: BOSS_HP,
             maxHp: BOSS_HP,
-            introState: 'HIDDEN',
-            introOffsetY: -300, // Start way above screen
+            introState: 'DORMANT', // Waiting for fog clear
+            introOffsetY: 0,
             introTimer: 0,
             defenseBuffTimer: 0,
+            hitsOnPlayer: 0, 
+            bulletCollisionCount: 0,
+            shotgunCooldown: 0,
         });
         bossSpawnedRef.current = true;
-    } else {
+    } 
+    // Spawn SALLY for Level 3
+    else if (level === 3) {
+        enemiesRef.current.push({
+            x: (GRID_WIDTH / 2) * TILE_SIZE - SALLY_SIZE / 2,
+            y: TILE_SIZE * 3, 
+            width: SALLY_SIZE,
+            height: SALLY_SIZE,
+            direction: Direction.DOWN,
+            speed: SALLY_SPEED,
+            id: 'SALLY',
+            type: 'boss',
+            cooldown: 0,
+            isDead: false,
+            hp: SALLY_HP,
+            maxHp: SALLY_HP,
+            introState: 'FIGHT', 
+            introOffsetY: 0,
+            introTimer: 0,
+            defenseBuffTimer: 0,
+            specialState: 'IDLE',
+            specialTimer: 0,
+            aimAngle: 0
+        });
+        bossSpawnedRef.current = true;
+    }
+    else {
         bossSpawnedRef.current = false;
     }
 
@@ -258,6 +297,61 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       r1.y < r2.y + r2.height &&
       r1.y + r1.height > r2.y
     );
+  };
+
+  // Utility: Laser Collision Check (Line segment to Circle approximate)
+  const checkLaserCollision = (
+    boss: Tank, 
+    angle: number, 
+    player: Tank, 
+    laserWidth: number
+  ): boolean => {
+    // Laser start point (boss center)
+    const bx = boss.x + boss.width / 2;
+    const by = boss.y + boss.height / 2;
+    
+    // Laser end point (far off screen)
+    const length = 1000;
+    const lx = bx + Math.cos(angle) * length;
+    const ly = by + Math.sin(angle) * length;
+    
+    // Player center and radius
+    const px = player.x + player.width / 2;
+    const py = player.y + player.height / 2;
+    const radius = player.width / 2;
+    
+    // Vector AB (Laser)
+    const abx = lx - bx;
+    const aby = ly - by;
+    
+    // Vector AP (Boss to Player)
+    const apx = px - bx;
+    const apy = py - by;
+    
+    // Project AP onto AB (t = (AP . AB) / (AB . AB))
+    const t = (apx * abx + apy * aby) / (abx * abx + aby * aby);
+    
+    // Find closest point on line segment
+    let closestX, closestY;
+    if (t < 0) {
+        closestX = bx;
+        closestY = by;
+    } else if (t > 1) {
+        closestX = lx;
+        closestY = ly;
+    } else {
+        closestX = bx + t * abx;
+        closestY = by + t * aby;
+    }
+    
+    // Distance from closest point to player center
+    const dx = px - closestX;
+    const dy = py - closestY;
+    const distSq = dx * dx + dy * dy;
+    
+    // Hit if distance is less than sum of radii (laser half-width + player radius)
+    const minDist = radius + laserWidth / 2;
+    return distSq < minDist * minDist;
   };
 
   // Utility: Damage Tile
@@ -370,19 +464,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 if (mapRef.current[y][x] === TileType.FOG) {
                     mapRef.current[y][x] = TileType.EMPTY;
                     // Spawn smoke puff for effect on every cleared tile
-                    // To prevent lag, maybe only spawn a few or randomize
                     if (Math.random() > 0.7) { 
                         explosionsRef.current.push({
                             x: x * TILE_SIZE + TILE_SIZE/2,
                             y: y * TILE_SIZE + TILE_SIZE/2,
                             id: Math.random().toString(),
-                            stage: 15,
+                            stage: 23, 
                             active: true,
                             type: 'smoke'
                         });
                     }
                 }
             }
+        }
+
+        // --- TRIGGER BOSS AWAKENING ---
+        const boss = enemiesRef.current.find(e => e.type === 'boss');
+        if (boss && boss.introState === 'DORMANT') {
+            boss.introState = 'AWAKENING';
+            boss.introTimer = 180; // 3 seconds of awakening
         }
     }
   };
@@ -454,7 +554,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     }
 
     // --- Enemy Spawning (Standard Levels) ---
-    if (level === 1 || level === 3) {
+    if (level === 1) { // Removed level 3 from standard spawning
         enemySpawnTimerRef.current++;
         if (enemySpawnTimerRef.current > 180 && enemiesRef.current.length < 4 && enemiesToSpawnRef.current > 0) {
             enemySpawnTimerRef.current = 0;
@@ -488,91 +588,267 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // Boss Logic
         if (enemy.type === 'boss') {
             
+            // SALLY SPECIALS: FIRE AURA & LASER
+            if (enemy.id === 'SALLY' && !enemy.isDead) {
+                // Emit Fire Particles
+                if (Math.random() > 0.3) {
+                     const cx = enemy.x + enemy.width/2;
+                     const cy = enemy.y + enemy.height/2;
+                     const angle = Math.random() * Math.PI * 2;
+                     const dist = enemy.width / 1.5; // Orbit
+                     
+                     explosionsRef.current.push({
+                         x: cx + Math.cos(angle) * dist,
+                         y: cy + Math.sin(angle) * dist,
+                         id: Math.random().toString(),
+                         stage: 20 + Math.floor(Math.random() * 10),
+                         active: true,
+                         type: 'fire',
+                         vx: (Math.random() - 0.5) * 0.5,
+                         vy: -1 - Math.random(), // Float up
+                     });
+                }
+
+                // --- SALLY LASER + SHOTGUN LOGIC ---
+                // State Machine: IDLE -> PRE_CHARGE -> CHARGING -> FIRING -> SHOTGUN -> IDLE
+                if (enemy.specialState === 'IDLE' || !enemy.specialState) {
+                    if (enemy.specialTimer === undefined) enemy.specialTimer = SALLY_LASER_COOLDOWN;
+                    
+                    // Standard movement logic only during IDLE
+                    if (!player.isDead) {
+                        const centerX = enemy.x + enemy.width / 2;
+                        const centerY = enemy.y + enemy.height / 2;
+                        const pCenterX = player.x + player.width / 2;
+                        const pCenterY = player.y + player.height / 2;
+                        
+                        // Horizontal Approach
+                        if (Math.abs(centerX - pCenterX) > 10) {
+                             const dx = pCenterX > centerX ? enemy.speed : -enemy.speed;
+                             if (!checkMapCollision({...enemy, x: enemy.x + dx})) {
+                                 enemy.x += dx;
+                                 enemy.direction = dx > 0 ? Direction.RIGHT : Direction.LEFT;
+                             }
+                        }
+                        // Vertical Approach
+                        if (Math.abs(centerY - pCenterY) > 10) {
+                             const dy = pCenterY > centerY ? enemy.speed : -enemy.speed;
+                             if (!checkMapCollision({...enemy, y: enemy.y + dy})) {
+                                 enemy.y += dy;
+                                 enemy.direction = dy > 0 ? Direction.DOWN : Direction.UP;
+                             }
+                        }
+                    }
+
+                    if (enemy.specialTimer > 0) {
+                        enemy.specialTimer--;
+                    } else {
+                        // Start Attack
+                        enemy.specialState = 'PRE_CHARGE';
+                        enemy.specialTimer = SALLY_PRE_CHARGE;
+                        enemy.speed = 0; 
+                    }
+                } else if (enemy.specialState === 'PRE_CHARGE') {
+                    // Phase 1: Stop and Lock Aim
+                    if (enemy.specialTimer && enemy.specialTimer > 0) {
+                        enemy.specialTimer--;
+                    } else {
+                        enemy.specialState = 'CHARGING';
+                        enemy.specialTimer = SALLY_CHARGE;
+                        
+                        // Calculate Aim Angle once
+                        if (!player.isDead) {
+                            const ecx = enemy.x + enemy.width/2;
+                            const ecy = enemy.y + enemy.height/2;
+                            const pcx = player.x + player.width/2;
+                            const pcy = player.y + player.height/2;
+                            enemy.aimAngle = Math.atan2(pcy - ecy, pcx - ecx);
+                        }
+                    }
+                } else if (enemy.specialState === 'CHARGING') {
+                    // Phase 2: Charge up
+                    if (enemy.specialTimer && enemy.specialTimer > 0) {
+                        enemy.specialTimer--;
+                    } else {
+                        enemy.specialState = 'FIRING';
+                        enemy.specialTimer = SALLY_LASER_DURATION;
+                    }
+                } else if (enemy.specialState === 'FIRING') {
+                    // Phase 3: Fire Laser
+                    if (!player.isDead && checkLaserCollision(enemy, enemy.aimAngle || 0, player, SALLY_LASER_WIDTH)) {
+                        // 1 hit every 10 frames
+                        if (enemy.specialTimer && enemy.specialTimer % 10 === 0) {
+                            player.hp -= 1;
+                            if (player.hp <= 0) {
+                                 player.isDead = true;
+                                 explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true, type: 'standard' });
+                                 setGameState(GameState.GAME_OVER);
+                                 onPlayerDeath();
+                            } else {
+                                 explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
+                            }
+                        }
+                    }
+
+                    if (enemy.specialTimer && enemy.specialTimer > 0) {
+                        enemy.specialTimer--;
+                    } else {
+                        // END FIRING -> TRIGGER LASER TRACE -> GOTO SHOTGUN
+                        explosionsRef.current.push({ 
+                             x: enemy.x + enemy.width/2, 
+                             y: enemy.y + enemy.height/2, 
+                             id: Math.random().toString(), 
+                             stage: SALLY_LASER_TRACE_DURATION, 
+                             active: true, 
+                             type: 'laser_trace',
+                             angle: enemy.aimAngle 
+                        });
+
+                        enemy.specialState = 'SHOTGUN';
+                        enemy.specialTimer = 0; // Immediate first burst
+                        enemy.burstCount = 0;
+                    }
+                } else if (enemy.specialState === 'SHOTGUN') {
+                    // Phase 4: Shotgun Bursts (3 bursts)
+                    if (enemy.specialTimer && enemy.specialTimer > 0) {
+                        enemy.specialTimer--;
+                    } else {
+                        // Check if we finished 3 bursts
+                        if (enemy.burstCount !== undefined && enemy.burstCount >= 3) {
+                             enemy.specialState = 'IDLE';
+                             enemy.specialTimer = SALLY_LASER_COOLDOWN;
+                             enemy.speed = SALLY_SPEED;
+                        } else {
+                             // FIRE BURST
+                             const bCx = enemy.x + enemy.width / 2;
+                             const bCy = enemy.y + enemy.height / 2;
+                             const pCx = player.x + player.width / 2;
+                             const pCy = player.y + player.height / 2;
+                             const baseAngle = Math.atan2(pCy - bCy, pCx - bCx);
+                             
+                             for (let k = 0; k < SALLY_SHOTGUN_BULLET_COUNT; k++) {
+                                 const spread = (Math.random() - 0.5) * (Math.PI / 2.5); // Wider spread
+                                 const angle = baseAngle + spread;
+                                 bulletsRef.current.push({
+                                     x: bCx - BULLET_SIZE / 2,
+                                     y: bCy - BULLET_SIZE / 2,
+                                     width: BULLET_SIZE,
+                                     height: BULLET_SIZE,
+                                     direction: Direction.DOWN,
+                                     speed: BOSS_BULLET_SPEED,
+                                     owner: 'boss',
+                                     active: true,
+                                     id: Math.random().toString(),
+                                     vx: Math.cos(angle) * BOSS_BULLET_SPEED,
+                                     vy: Math.sin(angle) * BOSS_BULLET_SPEED,
+                                     variant: 'standard'
+                                 });
+                             }
+                             explosionsRef.current.push({ x: bCx, y: bCy, id: Math.random().toString(), stage: 10, active: true, type: 'impact' });
+                             
+                             enemy.burstCount = (enemy.burstCount || 0) + 1;
+                             enemy.specialTimer = SALLY_SHOTGUN_BURST_DELAY;
+                        }
+                    }
+                }
+
+                // Skip generic boss logic for Sally
+                return;
+            } // END SALLY LOGIC
+
             // Manage Defense Buff Timer
             if (enemy.defenseBuffTimer && enemy.defenseBuffTimer > 0) {
                 enemy.defenseBuffTimer--;
             }
 
+            // Manage Shotgun Cooldown (Juggernaut Passive)
+            if (enemy.shotgunCooldown && enemy.shotgunCooldown > 0) {
+                enemy.shotgunCooldown--;
+            }
+
             // --- BOSS COLLISION WITH PLAYER MECHANIC ---
             if (!player.isDead && enemy.introState === 'FIGHT') {
                 if (checkRectCollision(enemy, player)) {
-                    // Trigger Defense Buff
-                    enemy.defenseBuffTimer = 600; // 10 seconds (60fps)
-                    // Optional: Push/bounce logic could go here, but collision just overlaps for now
+                    enemy.defenseBuffTimer = 600; 
                 }
             }
 
-            // --- CINEMATIC LOGIC ---
-            if (level === 2 && enemy.introState !== 'FIGHT') {
-                const triggerLine = CANVAS_HEIGHT - (6 * TILE_SIZE);
-                
-                if (enemy.introState === 'HIDDEN') {
-                    if (player.y < triggerLine) {
-                        enemy.introState = 'FALLING';
-                    }
-                    return; // Skip rest of logic
-                }
-                
-                if (enemy.introState === 'FALLING') {
-                    // Animate falling
-                    if (enemy.introOffsetY !== undefined) {
-                        enemy.introOffsetY += 10; // Fall speed
-                        if (enemy.introOffsetY >= 0) {
-                            enemy.introOffsetY = 0;
-                            enemy.introState = 'LANDING';
-                            
-                            // IMPACT
-                            hasBossCraterRef.current = true; // Draw crater
-                            explosionsRef.current.push({ 
-                                x: enemy.x + enemy.width/2, 
-                                y: enemy.y + enemy.height/2, 
-                                id: Math.random().toString(), 
-                                stage: 15, 
-                                active: true,
-                                type: 'impact' // Big explosion
-                            });
-                        }
-                    }
-                    return;
+            // --- BOSS INTRO LOGIC (Level 2 Specific) ---
+            if (level === 2) {
+                if (enemy.introState === 'DORMANT') {
+                    // Waiting for fog to clear, logic handled in checkFogOverlap
+                    return; 
                 }
 
-                if (enemy.introState === 'LANDING') {
-                    // Small delay before IDLE
-                    enemy.introState = 'IDLE';
-                    enemy.introTimer = 240; // 4 seconds * 60 fps
-                    return;
-                }
-
-                if (enemy.introState === 'IDLE') {
+                if (enemy.introState === 'AWAKENING') {
                     if (enemy.introTimer && enemy.introTimer > 0) {
                         enemy.introTimer--;
-                        // Smoke from tracks every few frames
-                        if (enemy.introTimer % 10 === 0) {
-                            explosionsRef.current.push({ 
-                                x: enemy.x + Math.random() * enemy.width, 
-                                y: enemy.y + enemy.height, // Bottom of tank
-                                id: Math.random().toString(), 
-                                stage: 10, 
+                        
+                        // PARTICLE LOGIC
+                        const centerX = enemy.x + enemy.width / 2;
+                        const centerY = enemy.y + enemy.height / 2;
+                        
+                        // 1. Emit Aura Particles (Spiral In)
+                        if (enemy.introTimer % 3 === 0) {
+                             const angle = (enemy.introTimer / 5);
+                             const radius = 40;
+                             const px = centerX + Math.cos(angle) * radius;
+                             const py = centerY + Math.sin(angle) * radius;
+                             
+                             explosionsRef.current.push({
+                                 x: px,
+                                 y: py,
+                                 id: Math.random().toString(),
+                                 stage: 30, // Life
+                                 active: true,
+                                 type: 'boss_aura',
+                                 vx: (centerX - px) * 0.05, // Suck in
+                                 vy: (centerY - py) * 0.05
+                             });
+                        }
+
+                        // 2. Glitch Particles (Random squares)
+                        if (Math.random() > 0.5) {
+                            const range = 50;
+                            const gx = centerX + (Math.random() - 0.5) * range;
+                            const gy = centerY + (Math.random() - 0.5) * range;
+                            const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFFFF'];
+                            const color = colors[Math.floor(Math.random() * colors.length)];
+                            
+                            explosionsRef.current.push({
+                                x: gx,
+                                y: gy,
+                                id: Math.random().toString(),
+                                stage: 5 + Math.floor(Math.random() * 5),
                                 active: true,
-                                type: 'smoke'
+                                type: 'glitch',
+                                color: color
                             });
                         }
                     } else {
+                        // Start Fight
                         enemy.introState = 'FIGHT';
+                        // Impact explosion on start
+                        explosionsRef.current.push({ 
+                            x: enemy.x + enemy.width/2, 
+                            y: enemy.y + enemy.height/2, 
+                            id: Math.random().toString(), 
+                            stage: 20, 
+                            active: true, 
+                            type: 'impact'
+                        });
                     }
                     return;
                 }
             }
-            // --- END CINEMATIC LOGIC ---
+            // --- END BOSS INTRO ---
 
             // Skip AI if not fighting
             if (enemy.introState && enemy.introState !== 'FIGHT') return;
 
-
             const isEnraged = enemy.hp <= enemy.maxHp / 2;
             
-            // Phase 2 Logic (Glasscannon + Chaotic Movement)
-            if (isEnraged) {
+            // Phase 2 Logic (Glasscannon + Chaotic Movement) - ONLY FOR JUGGERNAUT (Level 2)
+            if (isEnraged && level === 2) {
                  // 1. Ability Logic
                  bossSpecialTimerRef.current++;
                  if (bossSpecialTimerRef.current >= GLASSCANNON_COOLDOWN) {
@@ -652,7 +928,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                  }
 
             } else {
-                // PHASE 1: Normal Slow Tracking
+                // PHASE 1: Normal Slow Tracking (JUGGERNAUT)
                 if (!player.isDead) {
                     const centerX = enemy.x + enemy.width / 2;
                     const centerY = enemy.y + enemy.height / 2;
@@ -679,7 +955,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
             }
 
-            // Boss Shooting (Cardinal + Diagonals)
+            // Boss Shooting (Cardinal + Diagonals) - ONLY FOR JUGGERNAUT
             if (enemy.cooldown > 0) enemy.cooldown--;
             else {
                 // Determine cardinal direction
@@ -784,7 +1060,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             const b1 = bulletsRef.current[i];
             const b2 = bulletsRef.current[j];
             
-            // Glasscannon ignores bullet collision (unstopabble)
+            // Glasscannon ignores bullet collision (unstoppable)
             if (b1.variant === 'glasscannon' || b2.variant === 'glasscannon') continue;
 
             if (b1.active && b2.active && b1.owner !== b2.owner && checkRectCollision(b1, b2)) {
@@ -793,6 +1069,54 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 const midX = (b1.x + b2.x) / 2;
                 const midY = (b1.y + b2.y) / 2;
                 explosionsRef.current.push({ x: midX - 10, y: midY - 10, id: Math.random().toString(), stage: 5, active: true, type: 'standard' });
+
+                // --- BOSS PASSIVE: Bullet vs Bullet Counter ---
+                // Trigger: Boss Bullet hits Player Bullet
+                if ((b1.owner === 'boss' && b2.owner === 'player') || (b1.owner === 'player' && b2.owner === 'boss')) {
+                    const boss = enemiesRef.current.find(e => e.type === 'boss');
+                    if (boss && boss.introState === 'FIGHT') {
+                         boss.bulletCollisionCount = (boss.bulletCollisionCount || 0) + 1;
+                         
+                         // Check Trigger Condition: 3 collisions AND cooldown is ready
+                         if (boss.bulletCollisionCount >= 3 && (!boss.shotgunCooldown || boss.shotgunCooldown <= 0)) {
+                             // --- FIRE SHOTGUN ---
+                             const bCx = boss.x + boss.width / 2;
+                             const bCy = boss.y + boss.height / 2;
+                             const pCx = player.x + player.width / 2;
+                             const pCy = player.y + player.height / 2;
+                             const baseAngle = Math.atan2(pCy - bCy, pCx - bCx);
+                             
+                             // Spawn 10 bullets with random spread
+                             for (let k = 0; k < 10; k++) {
+                                 // Spread +/- 30 degrees (PI/6)
+                                 const spread = (Math.random() - 0.5) * (Math.PI / 3); 
+                                 const angle = baseAngle + spread;
+                                 
+                                 bulletsRef.current.push({
+                                     x: bCx - BULLET_SIZE / 2,
+                                     y: bCy - BULLET_SIZE / 2,
+                                     width: BULLET_SIZE,
+                                     height: BULLET_SIZE,
+                                     direction: Direction.DOWN, // Irrelevant with vectors
+                                     speed: BOSS_BULLET_SPEED,
+                                     owner: 'boss',
+                                     active: true,
+                                     id: Math.random().toString(),
+                                     vx: Math.cos(angle) * BOSS_BULLET_SPEED,
+                                     vy: Math.sin(angle) * BOSS_BULLET_SPEED,
+                                     variant: 'standard'
+                                 });
+                             }
+                             
+                             // Reset
+                             boss.bulletCollisionCount = 0;
+                             boss.shotgunCooldown = 240; // 4 seconds * 60 FPS
+                             
+                             // Visual Effect for Trigger
+                             explosionsRef.current.push({ x: bCx, y: bCy, id: Math.random().toString(), stage: 15, active: true, type: 'impact' });
+                         }
+                    }
+                }
             }
         }
     }
@@ -889,17 +1213,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
         }
     });
+    
+    // --- Particle Logic ---
+    explosionsRef.current.forEach(e => {
+        if (e.type === 'boss_aura') {
+            if (e.vx) e.x += e.vx;
+            if (e.vy) e.y += e.vy;
+        } else if (e.type === 'fire') {
+            if (e.vx) e.x += e.vx;
+            if (e.vy) e.y += e.vy;
+            // Flicker size? Handled in draw
+        }
+    });
 
     // Check Victory
     const aliveEnemies = enemiesRef.current.filter(e => !e.isDead).length;
     // For level 1, checking spawn count. For level 2, just checking if Jugg is dead (since spawned is 0)
     const allDead = enemiesRef.current.length > 0 && enemiesRef.current.every(e => e.isDead);
     
-    if (level === 1 || level === 3) {
+    if (level === 1) {
         if (enemiesToSpawnRef.current === 0 && aliveEnemies === 0 && enemiesRef.current.length > 0 && allDead) {
             setGameState(GameState.VICTORY);
         }
-    } else if (level === 2) {
+    } else if (level === 2 || level === 3) {
         if (bossSpawnedRef.current && aliveEnemies === 0) {
              setGameState(GameState.VICTORY);
         }
@@ -925,6 +1261,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Draw Map
     if (!mapRef.current || mapRef.current.length === 0) return;
+    
+    // Time variable for fog animation
+    const time = Date.now() / 1000;
+
     for (let y = 0; y < GRID_HEIGHT; y++) {
         for (let x = 0; x < GRID_WIDTH; x++) {
             const tile = mapRef.current[y][x];
@@ -1003,92 +1343,283 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                      ctx.fillRect(px + 22, py + 22, 4, 4);
                 }
             } else if (tile === TileType.FOG) {
-                 // Fog Block Rendering
-                 // Semi-transparent white/gray mist
-                 ctx.fillStyle = 'rgba(220, 220, 220, 0.5)'; // Milky white
+                 // Fog Block Rendering with Loop Animation
+                 ctx.save();
+                 // Clip to tile
+                 ctx.beginPath();
+                 ctx.rect(px, py, TILE_SIZE, TILE_SIZE);
+                 ctx.clip();
+
+                 // Base mist
+                 ctx.fillStyle = 'rgba(220, 220, 220, 0.3)';
                  ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                  
-                 // Add simple noise/texture
-                 ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-                 ctx.fillRect(px + 4, py + 4, TILE_SIZE/2, TILE_SIZE/2);
-                 ctx.fillRect(px + TILE_SIZE/2 + 2, py + TILE_SIZE/2 + 2, TILE_SIZE/3, TILE_SIZE/3);
+                 // Moving Mist Puffs
+                 const driftSpeed = 10;
+                 const drift = (time * driftSpeed) % TILE_SIZE;
+                 const driftY = (time * (driftSpeed * 0.5)) % TILE_SIZE;
+
+                 ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+                 
+                 // Puff 1
+                 const p1x = px + drift;
+                 const p1y = py + driftY;
+                 ctx.beginPath();
+                 ctx.arc(p1x, p1y, TILE_SIZE/1.5, 0, Math.PI * 2);
+                 ctx.fill();
+
+                 // Wrap Puff 1
+                 ctx.beginPath();
+                 ctx.arc(p1x - TILE_SIZE, p1y - TILE_SIZE, TILE_SIZE/1.5, 0, Math.PI * 2);
+                 ctx.fill();
+
+                 // Puff 2 (Offset)
+                 const p2x = px + TILE_SIZE - drift;
+                 const p2y = py + (driftY + TILE_SIZE/2) % TILE_SIZE;
+                 ctx.beginPath();
+                 ctx.arc(p2x, p2y, TILE_SIZE/2, 0, Math.PI * 2);
+                 ctx.fill();
+
+                 ctx.restore();
             }
         }
     }
 
-    // Draw Boss Crater
-    if (level === 2 && hasBossCraterRef.current) {
-        const bossStartX = (GRID_WIDTH / 2) * TILE_SIZE - BOSS_SIZE / 2;
-        const bossStartY = TILE_SIZE * 2; // Landing spot
-        
+    // Helper to draw Medusa (Sally Boss)
+    const drawMedusa = (tank: Tank) => {
+        const cx = tank.x + tank.width / 2;
+        const cy = tank.y + tank.height / 2;
+        const radius = tank.width / 2;
+
         ctx.save();
-        ctx.fillStyle = '#111'; // Dark crater
-        ctx.strokeStyle = '#333';
-        ctx.beginPath();
-        ctx.ellipse(bossStartX + BOSS_SIZE/2, bossStartY + BOSS_SIZE/2 + 10, BOSS_SIZE/1.5, BOSS_SIZE/4, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        ctx.translate(cx, cy);
+
+        // Rotation: If aiming, look at target. Else look in move direction.
+        let rotation = 0;
+        if (tank.specialState && tank.specialState !== 'IDLE' && tank.aimAngle !== undefined) {
+            rotation = tank.aimAngle;
+        } else {
+            // Map Direction enum to radians
+            switch(tank.direction) {
+                case Direction.RIGHT: rotation = 0; break;
+                case Direction.DOWN: rotation = Math.PI / 2; break;
+                case Direction.LEFT: rotation = Math.PI; break;
+                case Direction.UP: rotation = -Math.PI / 2; break;
+            }
+        }
+        // Rotate so 0 (Right) aligns with the drawing orientation
+        // We'll draw the face looking Right by default
+        ctx.rotate(rotation);
+
+        // Shake effect when charging/firing
+        if (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') {
+             ctx.translate((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+        }
+
+        // --- Snakes (Hair) ---
+        const time = Date.now() / 200;
+        const numSnakes = 12;
         
-        // Cracks from crater
-        ctx.strokeStyle = '#222';
+        for (let i = 0; i < numSnakes; i++) {
+            // Only wiggle snakes on the back half of the head (left side if facing right)
+            // Angles from PI/2 to 3PI/2
+            const baseAngle = Math.PI/2 + (Math.PI / (numSnakes-1)) * i;
+            
+            // Wiggle
+            const wiggleOffset = Math.sin(time * 3 + i) * 0.2;
+            const currentAngle = baseAngle + wiggleOffset;
+            
+            const len = radius * 0.8;
+            const sx = Math.cos(currentAngle) * (radius * 0.6);
+            const sy = Math.sin(currentAngle) * (radius * 0.6);
+            const ex = Math.cos(currentAngle) * (radius + len);
+            const ey = Math.sin(currentAngle) * (radius + len);
+
+            ctx.strokeStyle = '#2E8B57'; // Sea Green
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            // Quadratic curve for snake shape
+            const cpX = Math.cos(currentAngle + wiggleOffset) * (radius + len/2);
+            const cpY = Math.sin(currentAngle + wiggleOffset) * (radius + len/2);
+            ctx.quadraticCurveTo(cpX, cpY, ex, ey);
+            ctx.stroke();
+            
+            // Head
+            ctx.fillStyle = '#006400';
+            ctx.beginPath();
+            ctx.arc(ex, ey, 3, 0, Math.PI*2);
+            ctx.fill();
+        }
+
+        // --- Face Base ---
+        ctx.fillStyle = (tank.specialState === 'CHARGING') ? '#6B8E23' : '#8FBC8F'; // DarkOliveGreen vs DarkSeaGreen
         ctx.beginPath();
-        ctx.moveTo(bossStartX + BOSS_SIZE/2, bossStartY + BOSS_SIZE/2);
-        ctx.lineTo(bossStartX - 20, bossStartY + 40);
-        ctx.moveTo(bossStartX + BOSS_SIZE/2, bossStartY + BOSS_SIZE/2);
-        ctx.lineTo(bossStartX + BOSS_SIZE + 20, bossStartY + 40);
-        ctx.stroke();
+        // Slightly oval
+        ctx.ellipse(0, 0, radius * 0.7, radius * 0.65, 0, 0, Math.PI*2);
+        ctx.fill();
+        
+        // --- Facial Features (Oriented to face Right) ---
+        
+        // Eyes
+        const eyeColor = (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') ? '#FF0000' : '#FFFFE0';
+        const eyeGlow = (tank.specialState === 'CHARGING' || tank.specialState === 'FIRING') ? 20 : 0;
+        
+        ctx.fillStyle = eyeColor;
+        ctx.shadowColor = eyeColor;
+        ctx.shadowBlur = eyeGlow;
+
+        // Eyes position relative to center (facing right)
+        // Left Eye (Y-)
+        ctx.beginPath();
+        ctx.ellipse(radius * 0.3, -radius * 0.25, 5, 8, 0, 0, Math.PI*2);
+        ctx.fill();
+
+        // Right Eye (Y+)
+        ctx.beginPath();
+        ctx.ellipse(radius * 0.3, radius * 0.25, 5, 8, 0, 0, Math.PI*2);
+        ctx.fill();
+        
+        ctx.shadowBlur = 0;
+
+        // Mouth
+        ctx.strokeStyle = '#004d00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (tank.specialState === 'FIRING') {
+            // Open mouth (O shape)
+            ctx.fillStyle = '#330000';
+            ctx.ellipse(radius * 0.4, 0, 8, 12, 0, 0, Math.PI*2);
+            ctx.fill();
+        } else {
+            // Angry Mouth
+            ctx.moveTo(radius * 0.4, -radius * 0.15);
+            ctx.quadraticCurveTo(radius * 0.5, 0, radius * 0.4, radius * 0.15);
+            ctx.stroke();
+        }
+
         ctx.restore();
-    }
+    };
 
     // Helper to draw Tank
     const drawTank = (tank: Tank, color: string, detailColor: string = '#333') => {
         let drawY = tank.y;
+        let drawX = tank.x;
         
-        // Handle Intro Vertical Offset
-        if (tank.introOffsetY !== undefined) {
-            drawY += tank.introOffsetY;
+        // Handle Intro (DORMANT state: Boss is invisible/in shadows until fog lifts)
+        if (tank.introState === 'DORMANT') {
+            return; // Invisible when dormant (covered by fog)
+        }
+
+        // --- AWAKENING ANIMATION (Split Ghosting / Blur / Glitch) ---
+        if (tank.introState === 'AWAKENING') {
+            const shakeX = (Math.random() - 0.5) * 4;
+            const shakeY = (Math.random() - 0.5) * 4;
+            // Oscillating split effect
+            const splitDist = 6 * Math.sin(Date.now() / 50); 
+            
+            // Experimental Blur (Check support)
+            if ((ctx as any).filter) (ctx as any).filter = 'blur(2px)';
+            
+            // Ghost 1 (Cyan/Left)
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = '#00FFFF';
+            ctx.globalCompositeOperation = 'screen';
+            ctx.translate(drawX - splitDist + shakeX, drawY + shakeY);
+            ctx.fillRect(0, 0, tank.width, tank.height); // Simplified body
+            ctx.restore();
+
+            // Ghost 2 (Red/Right)
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = '#FF0000';
+            ctx.globalCompositeOperation = 'screen';
+            ctx.translate(drawX + splitDist + shakeX, drawY + shakeY);
+            ctx.fillRect(0, 0, tank.width, tank.height); // Simplified body
+            ctx.restore();
+            
+            // Reset filter for main body
+            if ((ctx as any).filter) (ctx as any).filter = 'none';
+            
+            // Main Body with slight transparency and shake
+            ctx.globalAlpha = 0.9;
+            drawX += shakeX;
+            drawY += shakeY;
+        }
+
+        // --- SALLY SPECIAL RENDER ---
+        if (tank.id === 'SALLY') {
+            drawMedusa(tank);
+            
+            // DRAW LASER BEAM (Needs global coords, so we draw it here after Medusa returns context)
+            if (tank.specialState === 'FIRING' && tank.aimAngle !== undefined) {
+                 const cx = tank.x + tank.width/2;
+                 const cy = tank.y + tank.height/2;
+                 const length = 1000;
+                 const lx = cx + Math.cos(tank.aimAngle) * length;
+                 const ly = cy + Math.sin(tank.aimAngle) * length;
+                 
+                 ctx.save();
+                 ctx.shadowColor = '#FF0000';
+                 ctx.shadowBlur = 30;
+                 ctx.beginPath();
+                 ctx.moveTo(cx, cy);
+                 ctx.lineTo(lx, ly);
+                 ctx.lineWidth = SALLY_LASER_WIDTH + Math.random() * 4;
+                 ctx.strokeStyle = '#FF0000';
+                 ctx.globalAlpha = 0.8 + Math.random() * 0.2;
+                 ctx.stroke();
+                 
+                 // Core
+                 ctx.beginPath();
+                 ctx.moveTo(cx, cy);
+                 ctx.lineTo(lx, ly);
+                 ctx.lineWidth = SALLY_LASER_WIDTH / 3;
+                 ctx.strokeStyle = '#FFFFFF';
+                 ctx.stroke();
+                 ctx.restore();
+            }
+            return;
         }
 
         // Handle Pulsation (Intro Idle)
         let scale = 1;
-        if (tank.introState === 'IDLE' && tank.introTimer) {
-             // Pulse 
-             scale = 1 + Math.sin(Date.now() / 100) * 0.05;
-        }
 
         ctx.save();
-        const cx = tank.x + tank.width / 2;
+        const cx = drawX + tank.width / 2;
         const cy = drawY + tank.height / 2;
         ctx.translate(cx, cy);
         ctx.scale(scale, scale);
         ctx.translate(-cx, -cy);
 
         ctx.fillStyle = color;
-        ctx.fillRect(tank.x + 4, drawY + 4, tank.width - 8, tank.height - 8);
+        ctx.fillRect(drawX + 4, drawY + 4, tank.width - 8, tank.height - 8);
         ctx.fillStyle = '#000'; 
         if (tank.direction === Direction.UP || tank.direction === Direction.DOWN) {
-            ctx.fillRect(tank.x, drawY, 6, tank.height);
-            ctx.fillRect(tank.x + tank.width - 6, drawY, 6, tank.height);
+            ctx.fillRect(drawX, drawY, 6, tank.height);
+            ctx.fillRect(drawX + tank.width - 6, drawY, 6, tank.height);
             ctx.fillStyle = detailColor;
             for(let i=0; i<tank.height; i+=4) {
-                ctx.fillRect(tank.x, drawY + i, 6, 2);
-                ctx.fillRect(tank.x + tank.width - 6, drawY + i, 6, 2);
+                ctx.fillRect(drawX, drawY + i, 6, 2);
+                ctx.fillRect(drawX + tank.width - 6, drawY + i, 6, 2);
             }
         } else {
-            ctx.fillRect(tank.x, drawY, tank.width, 6);
-            ctx.fillRect(tank.x, drawY + tank.height - 6, tank.width, 6);
+            ctx.fillRect(drawX, drawY, tank.width, 6);
+            ctx.fillRect(drawX, drawY + tank.height - 6, tank.width, 6);
             ctx.fillStyle = detailColor;
             for(let i=0; i<tank.width; i+=4) {
-                ctx.fillRect(tank.x + i, drawY, 2, 6);
-                ctx.fillRect(tank.x + i, drawY + tank.height - 6, 2, 6);
+                ctx.fillRect(drawX + i, drawY, 2, 6);
+                ctx.fillRect(drawX + i, drawY + tank.height - 6, 2, 6);
             }
         }
         ctx.fillStyle = color;
-        ctx.fillRect(tank.x + 8, drawY + 8, tank.width - 16, tank.height - 16);
+        ctx.fillRect(drawX + 8, drawY + 8, tank.width - 16, tank.height - 16);
         ctx.fillStyle = '#000';
-        ctx.fillRect(tank.x + 12, drawY + 12, tank.width - 24, tank.height - 24);
+        ctx.fillRect(drawX + 12, drawY + 12, tank.width - 24, tank.height - 24);
         ctx.fillStyle = '#EEE'; 
-        const centerX = tank.x + tank.width/2;
+        const centerX = drawX + tank.width/2;
         const centerY = drawY + tank.height/2;
         const barrelWidth = tank.width > 32 ? 8 : 4; // Thicker barrel for boss
         const barrelLen = tank.width > 32 ? 22 : 14;
@@ -1099,6 +1630,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         else if (tank.direction === Direction.RIGHT) ctx.fillRect(centerX, centerY - barrelWidth/2, barrelLen, barrelWidth);
 
         ctx.restore();
+        
+        // Reset Shadow
+        ctx.shadowBlur = 0;
     };
 
     if (!playerRef.current.isDead) {
@@ -1111,12 +1645,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Draw Enemies (including Boss, but without health bar above)
     enemiesRef.current.forEach(e => {
         if (e.type === 'boss') {
-            if (e.introState !== 'HIDDEN') {
-                const isEnraged = e.hp <= e.maxHp / 2;
-                const mainColor = isEnraged ? '#FF4500' : COLORS.BOSS; // Brighter red/orange when enraged
-                const detailColor = isEnraged ? '#FFFF00' : COLORS.BOSS_DETAIL;
-                drawTank(e, mainColor, detailColor);
-            }
+            const isEnraged = e.hp <= e.maxHp / 2;
+            const mainColor = isEnraged ? '#FF4500' : COLORS.BOSS; // Brighter red/orange when enraged
+            const detailColor = isEnraged ? '#FFFF00' : COLORS.BOSS_DETAIL;
+            drawTank(e, mainColor, detailColor);
         } else {
             drawTank(e, COLORS.ENEMY);
         }
@@ -1171,17 +1703,71 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.fillText("HEAL", e.x, e.y - (20 - e.stage));
         } else if ((e as any).type === 'smoke') {
             // Draw gray smoke
-            ctx.fillStyle = `rgba(150, 150, 150, ${e.stage / 15})`; // Lighter smoke
-            const size = (15 - e.stage) * 3;
+            ctx.fillStyle = `rgba(150, 150, 150, ${e.stage / 23})`; // Slower fade (divide by maxStage)
+            const size = (23 - e.stage) * 2; // Adjusted size growth for longer duration
             ctx.beginPath();
             ctx.arc(e.x, e.y, size, 0, Math.PI * 2);
             ctx.fill();
+        } else if ((e as any).type === 'boss_aura') {
+            // Boss Aura Particles
+            const alpha = e.stage / 30;
+            ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`; // Black core
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, (30 - e.stage)/2, 0, Math.PI * 2);
+            ctx.fill();
+            // Red Outline
+            ctx.strokeStyle = `rgba(200, 0, 0, ${alpha})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        } else if ((e as any).type === 'fire') {
+            // Fire Particles (Sally)
+            const alpha = e.stage / 30;
+            // Gradient from Yellow -> Orange -> Red
+            const lifeRatio = e.stage / 30; // 1.0 -> 0.0
+            if (lifeRatio > 0.7) ctx.fillStyle = `rgba(255, 255, 0, ${alpha})`; // Yellow
+            else if (lifeRatio > 0.3) ctx.fillStyle = `rgba(255, 140, 0, ${alpha})`; // Orange
+            else ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`; // Red
+            
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, (30 - e.stage)/3 + 2, 0, Math.PI * 2);
+            ctx.fill();
+        } else if ((e as any).type === 'glitch') {
+            // Glitch Rectangles
+            ctx.fillStyle = (e as any).color || '#00FF00';
+            const size = (e.stage / 5) * 20; // Scale with life
+            ctx.fillRect(e.x, e.y, size, size/4);
         } else if ((e as any).type === 'impact') {
             // Big impact explosion
             ctx.fillStyle = `rgba(50, 20, 0, ${e.stage / 15})`;
             ctx.beginPath();
             ctx.arc(e.x, e.y, (20 - e.stage) * 8, 0, Math.PI * 2);
             ctx.fill();
+        } else if ((e as any).type === 'laser_trace') {
+            // Laser Trace (Fading Red Line)
+            const alpha = e.stage / SALLY_LASER_TRACE_DURATION;
+            const cx = e.x;
+            const cy = e.y;
+            const length = 1000;
+            const angle = (e as any).angle || 0;
+            const lx = cx + Math.cos(angle) * length;
+            const ly = cy + Math.sin(angle) * length;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(lx, ly);
+            ctx.lineWidth = SALLY_LASER_WIDTH;
+            ctx.strokeStyle = `rgba(255, 0, 0, ${alpha * 0.5})`; // Fading Red
+            ctx.stroke();
+            
+            // Core
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(lx, ly);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = `rgba(255, 100, 100, ${alpha * 0.8})`;
+            ctx.stroke();
+            ctx.restore();
         } else {
             ctx.fillStyle = `rgba(255, 69, 0, ${e.stage / 10})`;
             const center = { x: e.x + 14, y: e.y + 14 };
@@ -1220,7 +1806,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = '#FFF';
         ctx.font = "16px 'Press Start 2P'";
         ctx.textAlign = 'center';
-        ctx.fillText("JUGGERNAUT", CANVAS_WIDTH / 2, barY - 10);
+        
+        let bossName = "JUGGERNAUT";
+        if (boss.id === 'SALLY') bossName = "SALLY";
+        
+        ctx.fillText(bossName, CANVAS_WIDTH / 2, barY - 10);
 
         // Background
         ctx.fillStyle = '#330000';

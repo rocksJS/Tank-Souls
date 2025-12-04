@@ -41,11 +41,20 @@ export interface Tank extends Entity {
   hp: number;
   maxHp: number;
   // Boss Intro Specifics
-  introState?: 'HIDDEN' | 'FALLING' | 'LANDING' | 'IDLE' | 'FIGHT';
+  introState?: 'HIDDEN' | 'FALLING' | 'LANDING' | 'IDLE' | 'FIGHT' | 'DORMANT' | 'AWAKENING';
   introOffsetY?: number; // For falling animation
   introTimer?: number;
   // Boss Mechanics
   defenseBuffTimer?: number; // Frames remaining for 50% damage reduction
+  hitsOnPlayer?: number; // Legacy tracking
+  bulletCollisionCount?: number; // Counts bullet-vs-bullet collisions
+  shotgunCooldown?: number; // Cooldown for passive ability
+  
+  // Sally (formerly Prophet) Boss Specials
+  specialState?: 'IDLE' | 'PRE_CHARGE' | 'CHARGING' | 'FIRING' | 'SHOTGUN';
+  specialTimer?: number;
+  aimAngle?: number;
+  burstCount?: number; // For shotgun bursts
 }
 
 export interface Bullet extends Entity {
@@ -60,7 +69,11 @@ export interface Explosion extends Position {
   id: string;
   stage: number; // For animation
   active: boolean;
-  type?: 'standard' | 'heal' | 'smoke' | 'impact';
+  type?: 'standard' | 'heal' | 'smoke' | 'impact' | 'boss_aura' | 'glitch' | 'fire' | 'laser_trace';
+  vx?: number;
+  vy?: number;
+  color?: string;
+  angle?: number; // For laser trace
 }
 
 export type GameMap = TileType[][];
