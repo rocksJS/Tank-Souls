@@ -7,18 +7,20 @@ interface UIOverlayProps {
   score: number;
   enemiesLeft: number;
   startGame: () => void;
+  resumeGame: () => void;
   level: number;
   setLevel: (level: number) => void;
   unlockedLevel: number;
+  isGameInProgress: boolean;
 }
 
-const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, enemiesLeft, startGame, level, setLevel, unlockedLevel }) => {
+const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, enemiesLeft, startGame, resumeGame, level, setLevel, unlockedLevel, isGameInProgress }) => {
   return (
     <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col items-center justify-center font-serif">
       
       {/* Main Menu - Tank Souls Style */}
       {gameState === GameState.MENU && (
-        <div className="bg-black/95 p-12 border border-gray-700 shadow-[0_0_60px_rgba(0,0,0,0.9)] text-center pointer-events-auto max-w-lg w-full relative overflow-hidden">
+        <div className="bg-black/95 p-12 border border-gray-700 shadow-[0_0_60px_rgba(0,0,0,0.9)] text-center pointer-events-auto max-w-lg w-full relative overflow-hidden flex flex-col items-center">
           {/* Decorative Corner Borders */}
           <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-gray-500"></div>
           <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-gray-500"></div>
@@ -57,11 +59,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ gameState, setGameState, score, e
 
           <button
             onClick={startGame}
-            className="group relative px-10 py-3 bg-transparent hover:bg-gray-900 text-gray-300 font-serif text-xl border border-gray-600 hover:border-gray-400 transition-all duration-500 ease-in-out"
+            className="group relative px-10 py-3 bg-transparent hover:bg-gray-900 text-gray-300 font-serif text-xl border border-gray-600 hover:border-gray-400 transition-all duration-500 ease-in-out w-full max-w-xs mb-4"
           >
             <span className="absolute inset-0 w-full h-full bg-gray-800/20 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left"></span>
             <span className="relative tracking-widest uppercase">Begin Journey</span>
           </button>
+          
+          {isGameInProgress && (
+              <button
+                onClick={resumeGame}
+                className="group relative px-10 py-3 bg-transparent hover:bg-gray-900 text-gray-400 font-serif text-lg border border-gray-800 hover:border-gray-500 transition-all duration-500 ease-in-out w-full max-w-xs"
+              >
+                <span className="absolute inset-0 w-full h-full bg-gray-800/10 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left"></span>
+                <span className="relative tracking-widest uppercase">Resume</span>
+              </button>
+          )}
         </div>
       )}
 

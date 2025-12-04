@@ -11,20 +11,32 @@ const App: React.FC = () => {
   
   const [level, setLevel] = useState<number>(1);
   const [unlockedLevel, setUnlockedLevel] = useState<number>(1);
+  
+  const [gameSessionId, setGameSessionId] = useState<number>(0);
+  const [isGameInProgress, setIsGameInProgress] = useState<boolean>(false);
 
-  // Handle Victory unlocking logic
+  // Handle Victory unlocking logic and game progress state
   useEffect(() => {
     if (gameState === GameState.VICTORY) {
+      setIsGameInProgress(false);
       if (level === unlockedLevel && level < 2) {
         setUnlockedLevel(prev => prev + 1);
       }
+    } else if (gameState === GameState.GAME_OVER) {
+      setIsGameInProgress(false);
     }
   }, [gameState, level, unlockedLevel]);
 
   const startGame = () => {
+    setGameSessionId(prev => prev + 1);
     setGameState(GameState.PLAYING);
     setScore(0);
     setEnemiesLeft(20);
+    setIsGameInProgress(true);
+  };
+  
+  const resumeGame = () => {
+      setGameState(GameState.PLAYING);
   };
 
   return (
@@ -41,6 +53,7 @@ const App: React.FC = () => {
                     setScore={setScore}
                     setEnemiesLeft={setEnemiesLeft}
                     level={level}
+                    gameSessionId={gameSessionId}
                  />
                  <UIOverlay 
                     gameState={gameState} 
@@ -48,9 +61,11 @@ const App: React.FC = () => {
                     score={score} 
                     enemiesLeft={enemiesLeft}
                     startGame={startGame}
+                    resumeGame={resumeGame}
                     level={level}
                     setLevel={setLevel}
                     unlockedLevel={unlockedLevel}
+                    isGameInProgress={isGameInProgress}
                  />
              </div>
              

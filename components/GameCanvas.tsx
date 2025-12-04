@@ -30,9 +30,10 @@ interface GameCanvasProps {
   setScore: React.Dispatch<React.SetStateAction<number>>;
   setEnemiesLeft: React.Dispatch<React.SetStateAction<number>>;
   level: number;
+  gameSessionId: number;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setScore, setEnemiesLeft, level }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setScore, setEnemiesLeft, level, gameSessionId }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Game State Refs (to avoid re-render loops and ensure sync in game loop)
@@ -112,11 +113,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
     setScore(0);
   }, [setScore, level]);
 
+  // Trigger reset only when gameSessionId changes (or level which implies new session usually)
   useEffect(() => {
-    if (gameState === GameState.PLAYING) {
-      resetGame();
-    }
-  }, [gameState, resetGame]);
+     resetGame();
+  }, [gameSessionId, resetGame]);
 
   // Input Handling
   useEffect(() => {
