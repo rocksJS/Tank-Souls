@@ -32,6 +32,29 @@ export const SALLY_SPEED = 0.5;
 export const SALLY_BULLET_SPEED = BOSS_BULLET_SPEED * 0.85; // Reduced by 15%
 export const SALLY_SNAKE_BULLET_SPEED = SALLY_BULLET_SPEED * 0.5; // 50% of normal bullet
 
+// Bloodseeker Boss (Level 4)
+export const BLOODSEEKER_HP = 40;
+export const BLOODSEEKER_SIZE = 40;
+export const BLOODSEEKER_BASE_SPEED = 1.0;
+export const BLOODSEEKER_MAX_SPEED = 3.5; // Very fast when low HP
+export const BLOOD_POOL_DURATION = 150; // Reduced to 2.5 seconds (60fps * 2.5) -> Then explodes
+export const BLOOD_POOL_DROP_RATE = 40; 
+export const BLOODSEEKER_BITE_RANGE = 180; // Doubled (was 90)
+export const BLOODSEEKER_PRE_BITE_DURATION = 72; // 1.2s
+export const BLOODSEEKER_BITE_DURATION = 20; // Lunge duration
+export const BLOODSEEKER_BITE_COOLDOWN = 90; // Reduced to 1.5 seconds (was 330)
+export const BLOODSEEKER_DRIFT_DURATION = 90; // 1.5 seconds inertia
+export const BLOODSEEKER_RETREAT_DURATION = 20; // 0.33s retreat
+export const BLOODSEEKER_HUNT_RADIUS = 160; // Distance to maintain while circling
+export const BLOODSEEKER_WIRE_TOLERANCE = 120; // 2 seconds allowed in wire before rage
+export const BLOODSEEKER_RAGE_DURATION = 240; // 4 seconds speed buff
+export const BLOODSEEKER_MISSILE_SPEED = PLAYER_BULLET_SPEED / 1.5; // 1.5x slower than player bullet
+export const BLOODSEEKER_BIG_POOL_DURATION = 300; // 5 seconds
+export const BLOODSEEKER_BIG_POOL_COOLDOWN = 480; // 8 seconds
+export const BLOODSEEKER_BIG_POOL_RADIUS = 240; // 10x standard ~24 radius
+export const BLOODSEEKER_TENTACLE_COUNT = 5;
+export const BLOODSEEKER_TENTACLE_MAX_LENGTH = 100; // ~3 blocks
+
 // Boss Phase 2 - Glasscannon Ability
 export const GLASSCANNON_COOLDOWN = 12 * 60; // 12 seconds * 60 FPS
 export const GLASSCANNON_SIZE = BULLET_SIZE * 3;
@@ -75,6 +98,7 @@ export const COLORS = {
   BOSS: '#8B0000', // Dark Red
   BOSS_DETAIL: '#FF0000',
   BULLET: '#FFFFFF',
+  WIRE: '#CCCCCC', // Light gray for wire
 };
 
 // Level 1: Standard layout (Extended height)
@@ -135,4 +159,40 @@ for(let y = 0; y < GRID_HEIGHT; y++) {
   }
 }
 
-export const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3];
+// Level 4: Barbed Wire Arena (Wire on sides, 4 Steel pillars in center)
+const LEVEL_4 = [];
+const WIRE = 12;
+const STEEL = 2;
+const FOG = 11;
+
+for(let y = 0; y < GRID_HEIGHT; y++) {
+    const r = Array(GRID_WIDTH).fill(FOG); // Start with FOG
+    
+    // Wire on sides (Outer Walls)
+    r[0] = WIRE;
+    r[GRID_WIDTH - 1] = WIRE;
+
+    // Clear Fog at bottom for player spawn area
+    if (y >= GRID_HEIGHT - 2) {
+        for(let x = 1; x < GRID_WIDTH - 1; x++) {
+            r[x] = 0;
+        }
+    }
+
+    // 4 Central Pillars (Steel 2x2 blocks)
+    // Pillar X: 10,11 and 14,15
+    if (y === 7 || y === 8 || y === 12 || y === 13) {
+        r[10] = STEEL; r[11] = STEEL;
+        r[14] = STEEL; r[15] = STEEL;
+        
+        // Add Wire Traps Flanking the Pillars (For baiting)
+        // Left of Left Pillar
+        r[7] = WIRE; 
+        // Right of Right Pillar
+        r[18] = WIRE; 
+    }
+
+    LEVEL_4.push(r);
+}
+
+export const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4];

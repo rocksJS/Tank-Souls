@@ -55,8 +55,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (gameState === GameState.VICTORY) {
       setIsGameInProgress(false);
-      // Allow unlocking up to Level 3
-      if (level === unlockedLevel && level < 3) {
+      // Allow unlocking up to Level 4
+      if (level === unlockedLevel && level < 4) {
         setUnlockedLevel(prev => prev + 1);
       }
     } else if (gameState === GameState.GAME_OVER) {
@@ -124,7 +124,7 @@ const App: React.FC = () => {
                         estusUnlocked={estusUnlocked}
                         estusCharges={estusCharges}
                         setEstusCharges={setEstusCharges}
-                        infiniteEstus={boneUnlocked && unlockedLevel >= 3}
+                        infiniteEstus={boneUnlocked && unlockedLevel >= 4}
                         setPlayerHp={setPlayerHp}
                      />
                      

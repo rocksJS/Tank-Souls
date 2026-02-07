@@ -50,7 +50,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 const newLevel = Math.max(1, level - 1);
                 if (newLevel <= unlockedLevel) setLevel(newLevel);
             } else if (e.code === 'ArrowRight') {
-                const newLevel = Math.min(3, level + 1); // Allow up to level 3
+                const newLevel = Math.min(4, level + 1); // Allow up to level 4
                 if (newLevel <= unlockedLevel) setLevel(newLevel);
             }
         }
@@ -92,7 +92,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     };
   }, [gameState, startGame, level, setLevel, isGameInProgress, setGameState, unlockedLevel, resumeGame, inputLocked, gameOverSelection]);
 
-  const isBoneActive = boneUnlocked && unlockedLevel >= 3;
+  const isBoneActive = boneUnlocked && unlockedLevel >= 4; // Max unlocked needed for infinite
   const ESTUS_PRICE = isBoneActive ? 0 : 20; 
   const DARKSIGN_PRICE = 999;
 
@@ -172,6 +172,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
              {renderLevelButton(1, 'I')}
              {renderLevelButton(2, 'II')}
              {renderLevelButton(3, 'III')}
+             {renderLevelButton(4, 'IV')}
           </div>
 
           <button
@@ -277,22 +278,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                          // Square NES Toggle
                          <div 
                             onClick={() => {
-                                // Toggle behavior: If >=3 (ON) -> Set to 1 (OFF). If <3 (OFF) -> Set to 3 (ON).
-                                if (unlockedLevel >= 3) {
+                                // Toggle behavior: If >=4 (ON) -> Set to 1 (OFF). If <4 (OFF) -> Set to 4 (ON).
+                                if (unlockedLevel >= 4) {
                                     if (setUnlockedLevel) setUnlockedLevel(1); // Lock levels back to 1
                                 } else {
-                                    if (setUnlockedLevel) setUnlockedLevel(3); // Unlock all
+                                    if (setUnlockedLevel) setUnlockedLevel(4); // Unlock all
                                 }
                             }}
                             className={`w-12 h-6 border-2 relative cursor-pointer transition-colors duration-200 flex items-center p-1 ${
-                                unlockedLevel >= 3 
+                                unlockedLevel >= 4 
                                 ? 'bg-[#003300] border-[#006600]' // Dark Green ON
                                 : 'bg-[#2a1a1a] border-[#880000]' // Dark Gray-Red OFF
                             }`}
                          >
                             {/* Knob */}
                             <div className={`w-3 h-3 border border-black shadow-sm transition-all duration-200 absolute ${
-                                unlockedLevel >= 3
+                                unlockedLevel >= 4
                                 ? 'right-1 bg-[#00ff00]' // Bright Green Knob
                                 : 'left-1 bg-[#880000]'   // Red Knob
                             }`}></div>
@@ -302,7 +303,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                          <button 
                             onClick={() => {
                                 setBoneUnlocked(true);
-                                if (setUnlockedLevel) setUnlockedLevel(3); // Immediately unlock levels (Toggle ON)
+                                if (setUnlockedLevel) setUnlockedLevel(4); // Immediately unlock levels (Toggle ON)
                             }}
                             className="text-[10px] px-2 py-1 border transition-all duration-300 w-full bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-400 cursor-pointer"
                         >
@@ -396,7 +397,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           <div className="w-64 h-px bg-yellow-900/50 mb-8"></div>
           
           <div className="flex flex-col gap-4 items-center">
-             {level < 3 ? (
+             {level < 4 ? (
                 <button
                     onClick={() => {
                         setLevel(level + 1);

@@ -19,6 +19,7 @@ export enum TileType {
   STEEL_DAMAGED_2 = 9, // 8-11 HP (Medium cracks)
   STEEL_DAMAGED_3 = 10, // 1-7 HP (Heavy damage)
   FOG = 11, // New Fog Block
+  WIRE = 12, // Barbed Wire (Kills player)
 }
 
 export interface Position {
@@ -32,6 +33,14 @@ export interface Entity extends Position {
   direction: Direction;
   speed: number;
   id: string;
+}
+
+export interface Tentacle {
+  angle: number;       // Current angle relative to boss
+  targetAngle: number; // Where it wants to point (towards player)
+  length: number;      // Current extension
+  maxLength: number;   // Max reach
+  wigglePhase: number; // For chaotic movement animation
 }
 
 export interface Tank extends Entity {
@@ -68,6 +77,22 @@ export interface Tank extends Entity {
   snakeFireTimer?: number; // Timer for snake hair firing
   moonDiscTimer?: number; // Timer for Phase 2 attack
   
+  // Bloodseeker Mechanics
+  bloodDropTimer?: number; // Timer for dropping blood pools
+  biteState?: 'IDLE' | 'PRE_BITE' | 'BITING' | 'COOLDOWN' | 'RETREAT';
+  biteTimer?: number;
+  wireHitTimer?: number; // Invulnerability specifically from wire damage
+  wireStayTimer?: number; // How long boss has been standing in wire
+  rageTimer?: number; // Speed boost and aggression after wire trap
+  driftVx?: number; // Inertia X
+  driftVy?: number; // Inertia Y
+  driftTimer?: number; // How long drift lasts
+  retreatTimer?: number; // Timer for retreating after attack
+  huntAngle?: number; // Angle for circling the player
+  chaosTimer?: number; // Timer for chaotic movement direction change
+  bigPoolTimer?: number; // Cooldown for Phase 2 Big Pool ability
+  tentacles?: Tentacle[]; // Phase 2 Tentacles
+
   // Player Mechanics
   invulnerabilityTimer?: number; // Frames of invincibility (0.5s = 30 frames)
 }
@@ -79,13 +104,15 @@ export interface Bullet extends Entity {
   vy?: number; // Velocity Y for free-angle movement
   variant?: 'standard' | 'glasscannon' | 'red_snake' | 'moon_disc'; // New variant for special attacks
   bounceCount?: number; // For moon_disc
+  homing?: boolean; // For Bloodseeker blood missiles
+  homingTurnRate?: number; // How fast it turns
 }
 
 export interface Explosion extends Position {
   id: string;
   stage: number; // For animation
   active: boolean;
-  type?: 'standard' | 'heal' | 'smoke' | 'impact' | 'boss_aura' | 'glitch' | 'fire' | 'laser_trace' | 'portal';
+  type?: 'standard' | 'heal' | 'smoke' | 'impact' | 'boss_aura' | 'glitch' | 'fire' | 'laser_trace' | 'portal' | 'blood_pool' | 'saliva' | 'big_blood_pool';
   vx?: number;
   vy?: number;
   color?: string;

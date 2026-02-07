@@ -45,7 +45,28 @@ import {
   SALLY_MOON_DISC_SPEED,
   SALLY_MOON_DISC_COOLDOWN,
   SALLY_MOON_DISC_SIZE,
-  SALLY_MOON_DISC_BOUNCES
+  SALLY_MOON_DISC_BOUNCES,
+  BLOODSEEKER_HP,
+  BLOODSEEKER_SIZE,
+  BLOODSEEKER_BASE_SPEED,
+  BLOODSEEKER_MAX_SPEED,
+  BLOOD_POOL_DURATION,
+  BLOOD_POOL_DROP_RATE,
+  BLOODSEEKER_BITE_RANGE,
+  BLOODSEEKER_PRE_BITE_DURATION,
+  BLOODSEEKER_BITE_DURATION,
+  BLOODSEEKER_BITE_COOLDOWN,
+  BLOODSEEKER_DRIFT_DURATION,
+  BLOODSEEKER_RETREAT_DURATION,
+  BLOODSEEKER_HUNT_RADIUS,
+  BLOODSEEKER_WIRE_TOLERANCE,
+  BLOODSEEKER_RAGE_DURATION,
+  BLOODSEEKER_MISSILE_SPEED,
+  BLOODSEEKER_BIG_POOL_DURATION,
+  BLOODSEEKER_BIG_POOL_COOLDOWN,
+  BLOODSEEKER_BIG_POOL_RADIUS,
+  BLOODSEEKER_TENTACLE_COUNT,
+  BLOODSEEKER_TENTACLE_MAX_LENGTH
 } from '../constants';
 import {
   Direction,
@@ -105,6 +126,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Game State Refs
   const mapRef = useRef<TileType[][]>([]);
   const tileHpRef = useRef<number[][]>([]); // Track specific HP for tiles
+  const godModeRef = useRef<boolean>(false); // CHEAT: Invincibility
 
   const spawnXTile = Math.floor(GRID_WIDTH / 2) - 2;
   const spawnX = spawnXTile * TILE_SIZE + (TILE_SIZE - TANK_SIZE) / 2;
@@ -177,6 +199,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     } else if (level === 3) {
        // Level 3 Setup - Sally
        setEnemiesLeft(1); // Only Sally left
+    } else if (level === 4) {
+       setEnemiesLeft(1); // BLOODSEEKER
     }
 
     // Set HP values based on map
@@ -219,8 +243,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     explosionsRef.current = [];
     baseActiveRef.current = true;
     enemySpawnTimerRef.current = 0;
-    // For level 2 and 3, we manage spawning manually
-    enemiesToSpawnRef.current = (level === 2 || level === 3) ? 0 : 20; 
+    
+    // Spawning Setup
+    if (level === 1) {
+        enemiesToSpawnRef.current = 20;
+    } else {
+        enemiesToSpawnRef.current = 0;
+    }
+
     moveKeysRef.current = [];
     setScore(0);
     bossSpecialTimerRef.current = 0;
@@ -283,6 +313,41 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         });
         bossSpawnedRef.current = true;
     }
+    // Spawn BLOODSEEKER for Level 4
+    else if (level === 4) {
+        enemiesRef.current.push({
+            x: (GRID_WIDTH / 2) * TILE_SIZE - BLOODSEEKER_SIZE / 2,
+            y: (GRID_HEIGHT / 2) * TILE_SIZE - BLOODSEEKER_SIZE / 2,
+            width: BLOODSEEKER_SIZE,
+            height: BLOODSEEKER_SIZE,
+            direction: Direction.DOWN,
+            speed: BLOODSEEKER_BASE_SPEED,
+            id: 'BLOODSEEKER',
+            type: 'boss',
+            cooldown: 0,
+            isDead: false,
+            hp: BLOODSEEKER_HP,
+            maxHp: BLOODSEEKER_HP,
+            introState: 'FIGHT', // Immediate fight
+            introOffsetY: 0,
+            introTimer: 0,
+            bloodDropTimer: 0,
+            biteState: 'IDLE',
+            biteTimer: 0,
+            wireHitTimer: 0,
+            wireStayTimer: 0,
+            driftVx: 0,
+            driftVy: 0,
+            driftTimer: 0,
+            retreatTimer: 0,
+            huntAngle: 0,
+            rageTimer: 0,
+            chaosTimer: 0,
+            bigPoolTimer: 0,
+            tentacles: [] // Initialize empty
+        });
+        bossSpawnedRef.current = true;
+    }
     else {
         bossSpawnedRef.current = false;
     }
@@ -304,8 +369,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
          }
       }
 
+      // RESTART LEVEL
+      if (e.code === 'KeyR' && gameState === GameState.PLAYING) {
+          resetGame();
+          return;
+      }
+
+      // GOD MODE TOGGLE
+      if (e.code === 'KeyJ' && gameState === GameState.PLAYING) {
+          godModeRef.current = !godModeRef.current;
+          // Visual feedback
+          explosionsRef.current.push({
+             x: playerRef.current.x + playerRef.current.width/2,
+             y: playerRef.current.y + playerRef.current.height/2,
+             id: Math.random().toString(),
+             stage: 20,
+             active: true,
+             type: 'impact' // Simple pop
+          });
+          return;
+      }
+
       // Estus Healing Logic (Updated for Infinite Use if Unlocked and Bone Active)
-      if ((e.code === 'KeyR' || e.code === 'KeyE') && gameState === GameState.PLAYING) {
+      if (e.code === 'KeyE' && gameState === GameState.PLAYING) {
          if (estusUnlocked) {
              const player = playerRef.current;
              if (!player.isDead && player.hp < player.maxHp) {
@@ -347,7 +433,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [estusUnlocked, gameState, setEstusCharges, infiniteEstus, setPlayerHp]);
+  }, [estusUnlocked, gameState, setEstusCharges, infiniteEstus, setPlayerHp, resetGame]);
 
   // Utility: AABB Collision
   const checkRectCollision = (r1: { x: number; y: number; width: number; height: number }, r2: { x: number; y: number; width: number; height: number }) => {
@@ -431,7 +517,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   // Utility: Check Map Collision
-  const checkMapCollision = (rect: { x: number; y: number; width: number; height: number }) => {
+  const checkMapCollision = (rect: { x: number; y: number; width: number; height: number }, entityType?: 'player' | 'boss' | 'enemy') => {
     const startX = Math.floor(rect.x / TILE_SIZE);
     const endX = Math.floor((rect.x + rect.width - 0.1) / TILE_SIZE);
     const startY = Math.floor(rect.y / TILE_SIZE);
@@ -441,7 +527,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       for (let x = startX; x <= endX; x++) {
         if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
           const tile = mapRef.current[y][x];
-          // Fog does not collide
+          
+          // Special Case: Boss can walk through WIRE (to take damage)
+          if (entityType === 'boss' && tile === TileType.WIRE) {
+              continue; 
+          }
+
           if (
               tile === TileType.BRICK || 
               tile === TileType.BRICK_DAMAGED || 
@@ -451,13 +542,54 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               tile === TileType.STEEL_DAMAGED_2 || 
               tile === TileType.STEEL_DAMAGED_3 || 
               tile === TileType.WATER || 
-              tile === TileType.BASE
+              tile === TileType.BASE ||
+              tile === TileType.WIRE 
             ) {
             return true;
           }
         } else {
             return true;
         }
+      }
+    }
+    return false;
+  };
+
+  // Check collision for Boss specifically against Wire (for damage)
+  const checkBossWireCollision = (boss: Tank): boolean => {
+    const startX = Math.floor(boss.x / TILE_SIZE);
+    const endX = Math.floor((boss.x + boss.width - 0.1) / TILE_SIZE);
+    const startY = Math.floor(boss.y / TILE_SIZE);
+    const endY = Math.floor((boss.y + boss.height - 0.1) / TILE_SIZE);
+
+    for (let y = startY; y <= endY; y++) {
+      for (let x = startX; x <= endX; x++) {
+          if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
+              if (mapRef.current[y][x] === TileType.WIRE) {
+                  return true;
+              }
+          }
+      }
+    }
+    return false;
+  };
+
+  // Helper to check if player touched wire
+  const checkWireDeath = (player: Tank) => {
+    if (godModeRef.current) return false;
+
+    const startX = Math.floor(player.x / TILE_SIZE);
+    const endX = Math.floor((player.x + player.width - 0.1) / TILE_SIZE);
+    const startY = Math.floor(player.y / TILE_SIZE);
+    const endY = Math.floor((player.y + player.height - 0.1) / TILE_SIZE);
+
+    for (let y = startY; y <= endY; y++) {
+      for (let x = startX; x <= endX; x++) {
+          if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
+              if (mapRef.current[y][x] === TileType.WIRE) {
+                  return true;
+              }
+          }
       }
     }
     return false;
@@ -479,7 +611,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             tile === TileType.STEEL ||
             tile === TileType.STEEL_DAMAGED_1 || 
             tile === TileType.STEEL_DAMAGED_2 || 
-            tile === TileType.STEEL_DAMAGED_3
+            tile === TileType.STEEL_DAMAGED_3 ||
+            tile === TileType.WIRE // Wire absorbs bullets
         ) {
              return { hit: true, tileX, tileY };
         }
@@ -574,6 +707,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             player.invulnerabilityTimer--;
         }
 
+        // Calculate Move Speed (Effect of Big Blood Pool)
+        let speedModifier = 1.0;
+        // Check if player is inside any active Big Blood Pool
+        const px = player.x + player.width/2;
+        const py = player.y + player.height/2;
+        
+        for (const exp of explosionsRef.current) {
+            if ((exp as any).type === 'big_blood_pool' && exp.active) {
+                const dx = px - exp.x;
+                const dy = py - exp.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < BLOODSEEKER_BIG_POOL_RADIUS) {
+                    speedModifier = 0.75; // 25% Slow
+                    break; 
+                }
+            }
+        }
+
+        const moveSpeed = player.speed * speedModifier;
+
         let dx = 0;
         let dy = 0;
         let moved = false;
@@ -581,10 +734,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const lastKey = moveKeysRef.current[moveKeysRef.current.length - 1];
 
         if (lastKey) {
-            if (lastKey === 'ArrowUp' || lastKey === 'KeyW') { dy = -player.speed; newDir = Direction.UP; moved = true; }
-            else if (lastKey === 'ArrowDown' || lastKey === 'KeyS') { dy = player.speed; newDir = Direction.DOWN; moved = true; }
-            else if (lastKey === 'ArrowLeft' || lastKey === 'KeyA') { dx = -player.speed; newDir = Direction.LEFT; moved = true; }
-            else if (lastKey === 'ArrowRight' || lastKey === 'KeyD') { dx = player.speed; newDir = Direction.RIGHT; moved = true; }
+            if (lastKey === 'ArrowUp' || lastKey === 'KeyW') { dy = -moveSpeed; newDir = Direction.UP; moved = true; }
+            else if (lastKey === 'ArrowDown' || lastKey === 'KeyS') { dy = moveSpeed; newDir = Direction.DOWN; moved = true; }
+            else if (lastKey === 'ArrowLeft' || lastKey === 'KeyA') { dx = -moveSpeed; newDir = Direction.LEFT; moved = true; }
+            else if (lastKey === 'ArrowRight' || lastKey === 'KeyD') { dx = moveSpeed; newDir = Direction.RIGHT; moved = true; }
         }
 
         if (moved) {
@@ -605,7 +758,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
             const nextX = player.x + dx;
             const nextY = player.y + dy;
-            if (!checkMapCollision({ ...player, x: nextX, y: nextY })) {
+            
+            // Check Wire Death
+            if (checkWireDeath({...player, x: nextX, y: nextY})) {
+                // Kill player
+                player.hp = 0;
+                setPlayerHp(0);
+                player.isDead = true;
+                setGameState(GameState.GAME_OVER);
+                onPlayerDeath();
+                explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 20, active: true, type: 'impact' });
+            } 
+            else if (!checkMapCollision({ ...player, x: nextX, y: nextY }, 'player')) {
                 player.x = nextX;
                 player.y = nextY;
                 
@@ -690,16 +854,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 if (enemy.introState === 'AWAKENING') {
                     if (enemy.introTimer && enemy.introTimer > 0) {
                         enemy.introTimer--;
-                        
                         // Level 3 SALLY AWAKENING (Eye Glow -> Tentacle Move)
                         if (enemy.id === 'SALLY') {
                             // Phase 1 (0-2s): Eyes glow (Visuals in Draw)
                             // Phase 2 (2-4s): Tentacles move (Visuals in Draw)
-                            // No particles needed for this specific request, just animation
                         } 
                         // Level 2 JUGGERNAUT AWAKENING
                         else {
-                            // 1. Emit Aura Particles (Spiral In)
                             const centerX = enemy.x + enemy.width / 2;
                             const centerY = enemy.y + enemy.height / 2;
                             if (enemy.introTimer % 3 === 0) {
@@ -707,7 +868,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                  const radius = 40;
                                  const px = centerX + Math.cos(angle) * radius;
                                  const py = centerY + Math.sin(angle) * radius;
-                                 
                                  explosionsRef.current.push({
                                      x: px,
                                      y: py,
@@ -719,7 +879,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                      vy: (centerY - py) * 0.05
                                  });
                             }
-    
                             // 2. Glitch Particles (Random squares)
                             if (Math.random() > 0.5) {
                                 const range = 50;
@@ -727,7 +886,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                 const gy = centerY + (Math.random() - 0.5) * range;
                                 const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFFFF'];
                                 const color = colors[Math.floor(Math.random() * colors.length)];
-                                
                                 explosionsRef.current.push({
                                     x: gx,
                                     y: gy,
@@ -757,6 +915,481 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
             // --- END BOSS INTRO ---
             
+            // --- BLOODSEEKER LOGIC (Level 4) ---
+            if (enemy.id === 'BLOODSEEKER') {
+                if (!player.isDead) {
+                    const centerX = enemy.x + enemy.width / 2;
+                    const centerY = enemy.y + enemy.height / 2;
+                    const pCenterX = player.x + player.width / 2;
+                    const pCenterY = player.y + player.height / 2;
+
+                    // PASSIVE POOL DROPPING
+                    enemy.bloodDropTimer = (enemy.bloodDropTimer || 0) + 1;
+                    if (enemy.bloodDropTimer > BLOOD_POOL_DROP_RATE) {
+                        enemy.bloodDropTimer = 0;
+                        if (Math.random() < 0.2) { // 20% chance every rate tick to drop pool if moving
+                             explosionsRef.current.push({
+                                 x: centerX,
+                                 y: centerY,
+                                 id: Math.random().toString(),
+                                 stage: BLOOD_POOL_DURATION, 
+                                 active: true,
+                                 type: 'blood_pool'
+                             });
+                        }
+                    }
+
+                    // PHASE 2 LOGIC (HP < 50%)
+                    const hpPercent = enemy.hp / enemy.maxHp;
+                    const isPhase2 = hpPercent < 0.5;
+
+                    if (isPhase2) {
+                        // 1. BIG BLOOD POOL
+                        if (enemy.bigPoolTimer === undefined) enemy.bigPoolTimer = 0;
+                        
+                        if (enemy.bigPoolTimer <= 0) {
+                            // Cast Big Pool
+                            explosionsRef.current.push({
+                                x: pCenterX, // Center on player
+                                y: pCenterY,
+                                id: Math.random().toString(),
+                                stage: BLOODSEEKER_BIG_POOL_DURATION, 
+                                active: true,
+                                type: 'big_blood_pool'
+                            });
+                            enemy.bigPoolTimer = BLOODSEEKER_BIG_POOL_COOLDOWN;
+                            // Visual cue for casting
+                            explosionsRef.current.push({ x: centerX, y: centerY, id: Math.random().toString(), stage: 20, active: true, type: 'boss_aura' });
+                        } else {
+                            enemy.bigPoolTimer--;
+                        }
+
+                        // 2. TENTACLES
+                        if (!enemy.tentacles) enemy.tentacles = [];
+                        
+                        // Initialize tentacles if needed
+                        if (enemy.tentacles.length === 0) {
+                            for(let i=0; i<BLOODSEEKER_TENTACLE_COUNT; i++) {
+                                enemy.tentacles.push({
+                                    angle: (Math.PI * 2 / BLOODSEEKER_TENTACLE_COUNT) * i,
+                                    targetAngle: 0,
+                                    length: 0,
+                                    maxLength: BLOODSEEKER_TENTACLE_MAX_LENGTH,
+                                    wigglePhase: Math.random() * Math.PI * 2
+                                });
+                            }
+                        }
+
+                        // Update Tentacles
+                        enemy.tentacles.forEach(tentacle => {
+                            // Calculate angle to player
+                            const angleToPlayer = Math.atan2(pCenterY - centerY, pCenterX - centerX);
+                            // Bias tentacle towards player slightly + random wander
+                            // Lerp angle
+                            let diff = angleToPlayer - tentacle.angle;
+                            while (diff < -Math.PI) diff += Math.PI * 2;
+                            while (diff > Math.PI) diff -= Math.PI * 2;
+                            
+                            tentacle.angle += diff * 0.05; // Slow turn to player
+                            tentacle.wigglePhase += 0.1;
+                            const wiggle = Math.sin(tentacle.wigglePhase) * 0.5;
+                            
+                            // Pulse length
+                            const targetLen = tentacle.maxLength * (0.8 + Math.sin(tentacle.wigglePhase * 0.5) * 0.2);
+                            tentacle.length += (targetLen - tentacle.length) * 0.1;
+
+                            // Collision Check (Tip of tentacle)
+                            const tipX = centerX + Math.cos(tentacle.angle + wiggle) * tentacle.length;
+                            const tipY = centerY + Math.sin(tentacle.angle + wiggle) * tentacle.length;
+                            
+                            // Check distance to player center
+                            const dist = Math.sqrt((tipX - pCenterX)**2 + (tipY - pCenterY)**2);
+                            if (dist < player.width) { // Hit
+                                 if (!godModeRef.current && (!player.invulnerabilityTimer || player.invulnerabilityTimer <= 0)) {
+                                      player.hp -= 1;
+                                      setPlayerHp(player.hp);
+                                      player.invulnerabilityTimer = 30;
+                                      explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 10, active: true, type: 'impact' });
+                                      if (player.hp <= 0) {
+                                          player.isDead = true;
+                                          setGameState(GameState.GAME_OVER);
+                                          onPlayerDeath();
+                                      }
+                                 }
+                            }
+                        });
+                    }
+
+                    // WIRE DAMAGE LOGIC & TOLERANCE
+                    if (enemy.wireHitTimer && enemy.wireHitTimer > 0) {
+                        enemy.wireHitTimer--;
+                    } 
+                    
+                    if (checkBossWireCollision(enemy)) {
+                        // Take damage logic
+                        if (!enemy.wireHitTimer) {
+                            enemy.hp -= 1; 
+                            enemy.wireHitTimer = 30; // 0.5s invulnerability
+                            explosionsRef.current.push({ x: centerX, y: centerY, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+                            if (enemy.hp <= 0) {
+                                enemy.isDead = true;
+                                setScore(prev => prev + 2000);
+                                setGameState(GameState.VICTORY);
+                            }
+                        }
+
+                        // Tolerance / Rage Logic
+                        enemy.wireStayTimer = (enemy.wireStayTimer || 0) + 1;
+                        
+                        // If stays too long, trigger Rage Buff
+                        if (enemy.wireStayTimer > BLOODSEEKER_WIRE_TOLERANCE) {
+                            enemy.rageTimer = BLOODSEEKER_RAGE_DURATION;
+                            enemy.wireStayTimer = 0; // Reset
+                            
+                            // Visual cue for buff activation
+                            explosionsRef.current.push({ x: centerX, y: centerY, id: Math.random().toString(), stage: 30, active: true, type: 'boss_aura' });
+                            
+                            // Spawn Projectiles Ring
+                            const ringCount = 12;
+                            for (let i = 0; i < ringCount; i++) {
+                                const angle = (Math.PI * 2 / ringCount) * i;
+                                bulletsRef.current.push({
+                                    x: centerX,
+                                    y: centerY,
+                                    width: BULLET_SIZE,
+                                    height: BULLET_SIZE,
+                                    direction: Direction.DOWN,
+                                    speed: PLAYER_BULLET_SPEED,
+                                    owner: 'boss',
+                                    active: true,
+                                    id: Math.random().toString(),
+                                    vx: Math.cos(angle) * PLAYER_BULLET_SPEED,
+                                    vy: Math.sin(angle) * PLAYER_BULLET_SPEED,
+                                    variant: 'red_snake'
+                                });
+                            }
+                        }
+
+                    } else {
+                        // Not in wire, reset tolerance timer
+                        enemy.wireStayTimer = 0;
+                    }
+
+                    // RAGE BUFF LOGIC
+                    let currentSpeed = 0;
+                    // 1. Calculate Base Speed based on HP
+                    const missingHpPercent = 1.0 - hpPercent;
+                    const baseSpeed = (BLOODSEEKER_BASE_SPEED + (BLOODSEEKER_MAX_SPEED - BLOODSEEKER_BASE_SPEED) * missingHpPercent);
+                    
+                    if (enemy.rageTimer && enemy.rageTimer > 0) {
+                        enemy.rageTimer--;
+                        currentSpeed = baseSpeed * 2.0; // 2x Speed
+                        // Visual effect
+                        if (enemy.rageTimer % 5 === 0) {
+                             explosionsRef.current.push({ x: centerX, y: centerY, id: Math.random().toString(), stage: 10, active: true, type: 'saliva' });
+                        }
+                    } else {
+                        currentSpeed = baseSpeed * 0.8; // Normal hunting speed
+                    }
+
+                    // STATE MACHINE: ATTACK LOGIC
+                    if (!enemy.biteState) enemy.biteState = 'IDLE';
+
+                    // COOLDOWN
+                    if (enemy.biteState === 'COOLDOWN') {
+                        enemy.biteTimer = (enemy.biteTimer || 0) - 1;
+                        if (enemy.biteTimer <= 0) {
+                            enemy.biteState = 'IDLE';
+                        }
+                    }
+
+                    // IDLE (HUNTING/CIRCLING + CAUTION)
+                    if (enemy.biteState === 'IDLE') {
+                        const dist = Math.sqrt(Math.pow(centerX - pCenterX, 2) + Math.pow(centerY - pCenterY, 2));
+                        
+                        // Attack Trigger
+                        if (dist < BLOODSEEKER_BITE_RANGE) {
+                            enemy.biteState = 'PRE_BITE';
+                            enemy.biteTimer = BLOODSEEKER_PRE_BITE_DURATION;
+                            // Reset Drift for attack stability
+                            enemy.driftTimer = 0;
+                        } else {
+                            // HUNTING MOVEMENT
+                            
+                            // 1. Calculate Base Movement Vector (Psychopath/Chaotic)
+                            if (!enemy.chaosTimer) enemy.chaosTimer = 0;
+                            enemy.chaosTimer--;
+                            if (enemy.chaosTimer <= 0) {
+                                enemy.chaosTimer = 10 + Math.random() * 20; 
+                                const angleToPlayer = Math.atan2(pCenterY - centerY, pCenterX - centerX);
+                                const randomOffset = (Math.random() - 0.5) * (Math.PI / 1.5); 
+                                enemy.huntAngle = angleToPlayer + randomOffset;
+                            }
+                            
+                            let moveAngle = enemy.huntAngle || 0;
+                            let moveDx = Math.cos(moveAngle) * currentSpeed;
+                            let moveDy = Math.sin(moveAngle) * currentSpeed;
+
+                            // 2. CAUTION LOGIC (Phase 2 Only)
+                            if (isPhase2) {
+                                // A. Avoid WIRE tiles
+                                // Scan 5x5 grid around boss center
+                                const tileX = Math.floor(centerX / TILE_SIZE);
+                                const tileY = Math.floor(centerY / TILE_SIZE);
+                                let repulseX = 0;
+                                let repulseY = 0;
+                                
+                                for(let ry = -2; ry <= 2; ry++) {
+                                    for(let rx = -2; rx <= 2; rx++) {
+                                        const ty = tileY + ry;
+                                        const tx = tileX + rx;
+                                        if (ty >= 0 && ty < GRID_HEIGHT && tx >= 0 && tx < GRID_WIDTH) {
+                                            if (mapRef.current[ty][tx] === TileType.WIRE) {
+                                                // Vector from wire center to boss
+                                                const wx = tx * TILE_SIZE + TILE_SIZE/2;
+                                                const wy = ty * TILE_SIZE + TILE_SIZE/2;
+                                                const dx = centerX - wx;
+                                                const dy = centerY - wy;
+                                                const distSq = dx*dx + dy*dy;
+                                                if (distSq < 10000 && distSq > 0) { // Within range
+                                                    const force = 2000 / distSq; // Inverse square law
+                                                    repulseX += dx * force;
+                                                    repulseY += dy * force;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // B. Avoid Player if too close (Caution)
+                                if (dist < 120) {
+                                    const pdx = centerX - pCenterX;
+                                    const pdy = centerY - pCenterY;
+                                    repulseX += pdx * 0.05;
+                                    repulseY += pdy * 0.05;
+                                }
+
+                                // Blend Repulsion into Movement
+                                moveDx += repulseX;
+                                moveDy += repulseY;
+                                
+                                // Cap speed
+                                const totalSpeed = Math.sqrt(moveDx*moveDx + moveDy*moveDy);
+                                if (totalSpeed > currentSpeed) {
+                                    const scale = currentSpeed / totalSpeed;
+                                    moveDx *= scale;
+                                    moveDy *= scale;
+                                }
+                            }
+
+                            // Apply movement with collision check
+                            // Remove 'boss' flag to respect WIRE as solid during hunting/caution
+                            let moved = false;
+                            
+                            // Check X
+                            if (!checkMapCollision({...enemy, x: enemy.x + moveDx})) {
+                                enemy.x += moveDx;
+                                moved = true;
+                            } else {
+                                moveDx = 0;
+                            }
+                            
+                            // Check Y
+                            if (!checkMapCollision({...enemy, y: enemy.y + moveDy})) {
+                                enemy.y += moveDy;
+                                moved = true;
+                            } else {
+                                moveDy = 0;
+                            }
+
+                            if (moved) {
+                                // Update visual direction based on primary movement axis
+                                if (Math.abs(moveDx) > Math.abs(moveDy)) {
+                                    enemy.direction = moveDx > 0 ? Direction.RIGHT : Direction.LEFT;
+                                } else {
+                                    enemy.direction = moveDy > 0 ? Direction.DOWN : Direction.UP;
+                                }
+                            }
+                        }
+                    }
+
+                    // PRE_BITE (SHAKING & ALIGNING)
+                    if (enemy.biteState === 'PRE_BITE') {
+                        enemy.biteTimer = (enemy.biteTimer || 0) - 1;
+                        
+                        // Face the player
+                        const angle = Math.atan2(pCenterY - centerY, pCenterX - centerX);
+                        const cos = Math.cos(angle);
+                        const sin = Math.sin(angle);
+                        
+                        if (Math.abs(cos) > Math.abs(sin)) {
+                            enemy.direction = cos > 0 ? Direction.RIGHT : Direction.LEFT;
+                        } else {
+                            enemy.direction = sin > 0 ? Direction.DOWN : Direction.UP;
+                        }
+
+                        // Align to Player Axis Logic (To prevent missing stationary player)
+                        // If facing Horizontal (Left/Right), align Y
+                        const alignSpeed = 1.0;
+                        if (enemy.direction === Direction.LEFT || enemy.direction === Direction.RIGHT) {
+                            if (Math.abs(centerY - pCenterY) > 2) {
+                                const alignDy = pCenterY > centerY ? alignSpeed : -alignSpeed;
+                                if (!checkMapCollision({...enemy, y: enemy.y + alignDy}, 'boss')) {
+                                    enemy.y += alignDy;
+                                }
+                            }
+                        } 
+                        // If facing Vertical (Up/Down), align X
+                        else {
+                            if (Math.abs(centerX - pCenterX) > 2) {
+                                const alignDx = pCenterX > centerX ? alignSpeed : -alignSpeed;
+                                if (!checkMapCollision({...enemy, x: enemy.x + alignDx}, 'boss')) {
+                                    enemy.x += alignDx;
+                                }
+                            }
+                        }
+
+                        if (enemy.biteTimer <= 0) {
+                            enemy.biteState = 'BITING';
+                            enemy.biteTimer = BLOODSEEKER_BITE_DURATION;
+                            // INERTIA SETUP: Start fast dash
+                            const dashSpeed = 9.0;
+                            if (enemy.direction === Direction.UP) { enemy.driftVx = 0; enemy.driftVy = -dashSpeed; }
+                            else if (enemy.direction === Direction.DOWN) { enemy.driftVx = 0; enemy.driftVy = dashSpeed; }
+                            else if (enemy.direction === Direction.LEFT) { enemy.driftVx = -dashSpeed; enemy.driftVy = 0; }
+                            else if (enemy.direction === Direction.RIGHT) { enemy.driftVx = dashSpeed; enemy.driftVy = 0; }
+                        }
+                    }
+
+                    // BITING (LUNGE)
+                    else if (enemy.biteState === 'BITING') {
+                        // Lunge forward fast - USE DRIFT VECTOR for direction
+                        const dx = enemy.driftVx || 0;
+                        const dy = enemy.driftVy || 0;
+                        
+                        // INERTIA LOGIC: use 'boss' type to IGNORE wire/hazards and keep moving (potentially taking damage)
+                        // This allows the boss to be baited into wire.
+                        if (!checkMapCollision({...enemy, x: enemy.x + dx, y: enemy.y + dy}, 'boss')) {
+                            enemy.x += dx;
+                            enemy.y += dy;
+                        } else {
+                             // Hit wall? Stop bite state early, move to recovery
+                             enemy.biteTimer = 0;
+                        }
+
+                        // Spawn Particles (Saliva/Rage)
+                        if (enemy.biteTimer && enemy.biteTimer % 4 === 0) {
+                             const px = centerX + (Math.random() - 0.5) * 20;
+                             const py = centerY + (Math.random() - 0.5) * 20;
+                             explosionsRef.current.push({
+                                 x: px, y: py,
+                                 id: Math.random().toString(),
+                                 stage: 15,
+                                 active: true,
+                                 type: 'saliva', // new type
+                                 vx: (Math.random() - 0.5),
+                                 vy: (Math.random() - 0.5)
+                             });
+                        }
+
+                        enemy.biteTimer = (enemy.biteTimer || 0) - 1;
+                        if (enemy.biteTimer <= 0) {
+                            // Transition to RECOVERY (Slide) instead of direct retreat
+                            enemy.biteState = 'RECOVERY';
+                            // Reuse retreat timer as recovery timer
+                            enemy.retreatTimer = 15; // Slide for 15 frames
+                        }
+                    }
+
+                    // RECOVERY (INERTIA SLIDE)
+                    else if (enemy.biteState === 'RECOVERY') {
+                         if (enemy.retreatTimer && enemy.retreatTimer > 0) {
+                             enemy.retreatTimer--;
+                             
+                             // Apply friction
+                             const friction = 0.85;
+                             enemy.driftVx = (enemy.driftVx || 0) * friction;
+                             enemy.driftVy = (enemy.driftVy || 0) * friction;
+                             
+                             const dx = enemy.driftVx;
+                             const dy = enemy.driftVy;
+                             
+                             // Keep moving if significant speed
+                             if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                                 // Still ignore wire, but respect walls
+                                 if (!checkMapCollision({...enemy, x: enemy.x + dx, y: enemy.y + dy}, 'boss')) {
+                                     enemy.x += dx;
+                                     enemy.y += dy;
+                                 }
+                             }
+                         } else {
+                             // Slide done, now retreat
+                             enemy.biteState = 'RETREAT';
+                             enemy.retreatTimer = BLOODSEEKER_RETREAT_DURATION;
+                         }
+                    }
+
+                    // RETREAT (BACK AWAY)
+                    else if (enemy.biteState === 'RETREAT') {
+                        enemy.retreatTimer = (enemy.retreatTimer || 0) - 1;
+                        
+                        // Move away from player
+                        const angleAway = Math.atan2(centerY - pCenterY, centerX - pCenterX);
+                        const retreatSpeed = 2.5;
+                        const dx = Math.cos(angleAway) * retreatSpeed;
+                        const dy = Math.sin(angleAway) * retreatSpeed;
+                        
+                        let moved = false;
+                        // Use 'boss' type to ignore wire damage during urgent retreat
+                        if (!checkMapCollision({...enemy, x: enemy.x + dx}, 'boss')) {
+                            enemy.x += dx;
+                            moved = true;
+                        }
+                        if (!checkMapCollision({...enemy, y: enemy.y + dy}, 'boss')) {
+                            enemy.y += dy;
+                            moved = true;
+                        }
+
+                        // Apply slide inertia logic from earlier (if moved)
+                        if (moved) {
+                             if (Math.abs(dx) > Math.abs(dy)) {
+                                enemy.driftVx = dx; enemy.driftVy = 0;
+                             } else {
+                                enemy.driftVx = 0; enemy.driftVy = dy;
+                             }
+                             enemy.driftTimer = BLOODSEEKER_DRIFT_DURATION;
+                        }
+
+                        if (enemy.retreatTimer <= 0) {
+                            enemy.biteState = 'COOLDOWN';
+                            enemy.biteTimer = BLOODSEEKER_BITE_COOLDOWN;
+                        }
+                    }
+
+                    // INERTIA (SLIDING - GENERAL)
+                    // Only apply drift if not attacking
+                    if (enemy.biteState !== 'PRE_BITE' && enemy.biteState !== 'BITING' && enemy.biteState !== 'RECOVERY') {
+                        if (enemy.driftTimer && enemy.driftTimer > 0) {
+                            enemy.driftTimer--;
+                            const ratio = enemy.driftTimer / BLOODSEEKER_DRIFT_DURATION;
+                            const slideX = (enemy.driftVx || 0) * ratio;
+                            const slideY = (enemy.driftVy || 0) * ratio;
+                            
+                            // Use 'boss' type to avoid getting stuck on wire during drift
+                            if (!checkMapCollision({...enemy, x: enemy.x + slideX, y: enemy.y + slideY}, 'boss')) {
+                                enemy.x += slideX;
+                                enemy.y += slideY;
+                            }
+                        }
+                    }
+                }
+                
+                // Melee Collision with Player handled in generic boss section
+                // NO SHOOTING for Bloodseeker
+                return; 
+            }
+            // --- END BLOODSEEKER ---
+
             // SALLY SPECIALS: FIRE AURA & LASER & MOON DISCS
             if (enemy.id === 'SALLY' && !enemy.isDead) {
                 
@@ -944,7 +1577,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         
                         // BOSS VS PLAYER COLLISION
                         if (checkRectCollision(enemy, player)) {
-                            if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+                            if (godModeRef.current) {
+                                // God Mode: No damage
+                            } else if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
                                 // Hit during invulnerability: do nothing
                             } else {
                                 player.hp = 0;
@@ -1099,8 +1734,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         } else if (enemy.specialState === 'FIRING') {
                             if (!player.isDead && checkLaserCollision(enemy, enemy.aimAngle || 0, player, SALLY_LASER_WIDTH)) {
                                 if (enemy.specialTimer && enemy.specialTimer % 10 === 0) {
-                                    // Check Invulnerability for Laser
-                                    if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+                                    if (godModeRef.current) {
+                                        // God Mode
+                                    } else if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
                                         // Invulnerable
                                     } else {
                                         player.hp -= 1;
@@ -1194,7 +1830,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- BOSS COLLISION WITH PLAYER MECHANIC ---
             if (!player.isDead && enemy.introState === 'FIGHT') {
                 if (checkRectCollision(enemy, player)) {
-                    enemy.defenseBuffTimer = 600; 
+                    if (godModeRef.current) {
+                        // God Mode
+                    } else if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
+                        // Invulnerable
+                    } else {
+                        // Collision Damage
+                        player.hp -= 1;
+                        setPlayerHp(player.hp);
+                        player.invulnerabilityTimer = 30; // 0.5s Invulnerability
+                        explosionsRef.current.push({ x: player.x, y: player.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+                        if (player.hp <= 0) {
+                            player.isDead = true;
+                            setGameState(GameState.GAME_OVER);
+                            onPlayerDeath();
+                        }
+                    }
+                    
+                    // Juggernaut Buff logic (only for JUGGERNAUT)
+                    if (enemy.id === 'JUGG') enemy.defenseBuffTimer = 600; 
                 }
             }
 
@@ -1283,7 +1937,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                      enemy.y += vy;
                  }
 
-            } else {
+            } else if (level !== 4) { // Not Bloodseeker
                 // PHASE 1: Normal Slow Tracking (JUGGERNAUT)
                 if (!player.isDead) {
                     const centerX = enemy.x + enemy.width / 2;
@@ -1312,56 +1966,58 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
 
             // Boss Shooting (Cardinal + Diagonals) - ONLY FOR JUGGERNAUT
-            if (enemy.cooldown > 0) enemy.cooldown--;
-            else {
-                // Determine cardinal direction
-                const pCx = player.x + player.width / 2;
-                const pCy = player.y + player.height / 2;
-                const eCx = enemy.x + enemy.width / 2;
-                const eCy = enemy.y + enemy.height / 2;
+            if (enemy.id !== 'BLOODSEEKER') {
+                if (enemy.cooldown > 0) enemy.cooldown--;
+                else {
+                    // Determine cardinal direction
+                    const pCx = player.x + player.width / 2;
+                    const pCy = player.y + player.height / 2;
+                    const eCx = enemy.x + enemy.width / 2;
+                    const eCy = enemy.y + enemy.height / 2;
 
-                let fireDir = Direction.DOWN;
-                let baseAngle = Math.PI / 2; // Default Down
+                    let fireDir = Direction.DOWN;
+                    let baseAngle = Math.PI / 2; // Default Down
 
-                if (Math.abs(pCx - eCx) > Math.abs(pCy - eCy)) {
-                    if (pCx > eCx) {
-                         fireDir = Direction.RIGHT;
-                         baseAngle = 0;
+                    if (Math.abs(pCx - eCx) > Math.abs(pCy - eCy)) {
+                        if (pCx > eCx) {
+                             fireDir = Direction.RIGHT;
+                             baseAngle = 0;
+                        } else {
+                             fireDir = Direction.LEFT;
+                             baseAngle = Math.PI;
+                        }
                     } else {
-                         fireDir = Direction.LEFT;
-                         baseAngle = Math.PI;
+                        if (pCy > eCy) {
+                            fireDir = Direction.DOWN;
+                            baseAngle = Math.PI / 2;
+                        } else {
+                            fireDir = Direction.UP;
+                            baseAngle = -Math.PI / 2;
+                        }
                     }
-                } else {
-                    if (pCy > eCy) {
-                        fireDir = Direction.DOWN;
-                        baseAngle = Math.PI / 2;
-                    } else {
-                        fireDir = Direction.UP;
-                        baseAngle = -Math.PI / 2;
-                    }
-                }
 
-                // Fire 3 bullets: Center, -45deg, +45deg (Fan shot)
-                const angles = [baseAngle, baseAngle - Math.PI/4, baseAngle + Math.PI/4];
-                
-                angles.forEach(angle => {
-                     bulletsRef.current.push({
-                        x: eCx - BULLET_SIZE / 2,
-                        y: eCy - BULLET_SIZE / 2,
-                        width: BULLET_SIZE,
-                        height: BULLET_SIZE,
-                        direction: fireDir,
-                        speed: BOSS_BULLET_SPEED,
-                        owner: 'boss',
-                        active: true,
-                        id: Math.random().toString(),
-                        vx: Math.cos(angle) * BOSS_BULLET_SPEED,
-                        vy: Math.sin(angle) * BOSS_BULLET_SPEED,
-                        variant: 'standard'
+                    // Fire 3 bullets: Center, -45deg, +45deg (Fan shot)
+                    const angles = [baseAngle, baseAngle - Math.PI/4, baseAngle + Math.PI/4];
+                    
+                    angles.forEach(angle => {
+                         bulletsRef.current.push({
+                            x: eCx - BULLET_SIZE / 2,
+                            y: eCy - BULLET_SIZE / 2,
+                            width: BULLET_SIZE,
+                            height: BULLET_SIZE,
+                            direction: fireDir,
+                            speed: BOSS_BULLET_SPEED,
+                            owner: 'boss',
+                            active: true,
+                            id: Math.random().toString(),
+                            vx: Math.cos(angle) * BOSS_BULLET_SPEED,
+                            vy: Math.sin(angle) * BOSS_BULLET_SPEED,
+                            variant: 'standard'
+                        });
                     });
-                });
-                
-                enemy.cooldown = BOSS_SHOOT_COOLDOWN;
+                    
+                    enemy.cooldown = BOSS_SHOOT_COOLDOWN;
+                }
             }
 
         } else {
@@ -1414,6 +2070,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     bulletsRef.current.forEach(bullet => {
         if (!bullet.active) return;
 
+        // --- HOMING MISSILE LOGIC ---
+        if (bullet.homing && !playerRef.current.isDead) {
+            const bx = bullet.x + bullet.width/2;
+            const by = bullet.y + bullet.height/2;
+            const px = playerRef.current.x + playerRef.current.width/2;
+            const py = playerRef.current.y + playerRef.current.height/2;
+            
+            // Calculate angle to target
+            const targetAngle = Math.atan2(py - by, px - bx);
+            
+            // Simple Steering (Set Velocity directly to target for aggressive homing as per req)
+            const speed = bullet.speed; // Uses its own speed property now
+            
+            // Just update velocity to point to player
+            bullet.vx = Math.cos(targetAngle) * speed;
+            bullet.vy = Math.sin(targetAngle) * speed;
+        }
+
         // Handle Moon Disc Bouncing (Special Physics)
         if (bullet.variant === 'moon_disc' && bullet.vx !== undefined && bullet.vy !== undefined) {
             // Predict X movement
@@ -1448,6 +2122,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             // ADDED: Player Collision Check
             if (bullet.owner === 'boss' && !playerRef.current.isDead) {
                 if (checkRectCollision(bullet, playerRef.current)) {
+                     if (godModeRef.current) {
+                         // God Mode: No damage
+                         bullet.active = false;
+                         explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
+                         return;
+                     }
+
                      // Check invulnerability
                      if (playerRef.current.invulnerabilityTimer && playerRef.current.invulnerabilityTimer > 0) {
                          // Invulnerable: Ignore or Absorb
@@ -1557,6 +2238,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 bullet.active = false;
                  explosionsRef.current.push({ x: bullet.x, y: bullet.y, id: Math.random().toString(), stage: 5, active: true, type: 'impact' });
                  
+                 if (godModeRef.current) {
+                     return;
+                 }
+
                  // Check Invulnerability
                  if (player.invulnerabilityTimer && player.invulnerabilityTimer > 0) {
                      return;
@@ -1587,6 +2272,92 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       if (exp.vx) exp.x += exp.vx;
       if (exp.vy) exp.y += exp.vy;
       
+      // BLOOD POOL EXPLOSION LOGIC (End of life)
+      if ((exp as any).type === 'blood_pool') {
+          if (exp.stage === 1) { // About to die
+              // Spawn Homing Missiles (6 small ones)
+              const missileCount = 6; 
+              const angleStep = (Math.PI * 2) / missileCount;
+              
+              for (let i=0; i<missileCount; i++) {
+                  const angle = i * angleStep;
+                  bulletsRef.current.push({
+                        x: exp.x,
+                        y: exp.y,
+                        width: BULLET_SIZE / 2, // Half size
+                        height: BULLET_SIZE / 2,
+                        direction: Direction.DOWN,
+                        speed: BLOODSEEKER_MISSILE_SPEED, // Slower speed
+                        owner: 'boss',
+                        active: true,
+                        id: Math.random().toString(),
+                        vx: Math.cos(angle) * BLOODSEEKER_MISSILE_SPEED,
+                        vy: Math.sin(angle) * BLOODSEEKER_MISSILE_SPEED,
+                        variant: 'red_snake',
+                        homing: true
+                  });
+              }
+              // Visual POP
+              explosionsRef.current.push({ x: exp.x, y: exp.y, id: Math.random().toString(), stage: 20, active: true, type: 'impact' });
+          }
+      }
+
+      // BIG BLOOD POOL END LOGIC (Damage on expiry)
+      if ((exp as any).type === 'big_blood_pool') {
+          if (exp.stage === 1) {
+              // EXPLODE
+              explosionsRef.current.push({ x: exp.x, y: exp.y, id: Math.random().toString(), stage: 30, active: true, type: 'impact' }); // Big impact visual
+              
+              if (!playerRef.current.isDead) {
+                  const px = playerRef.current.x + playerRef.current.width/2;
+                  const py = playerRef.current.y + playerRef.current.height/2;
+                  const dx = px - exp.x;
+                  const dy = py - exp.y;
+                  const dist = Math.sqrt(dx*dx + dy*dy);
+                  
+                  if (dist < BLOODSEEKER_BIG_POOL_RADIUS) {
+                       if (!godModeRef.current && (!playerRef.current.invulnerabilityTimer || playerRef.current.invulnerabilityTimer <= 0)) {
+                          playerRef.current.hp -= 1;
+                          setPlayerHp(playerRef.current.hp);
+                          playerRef.current.invulnerabilityTimer = 30;
+                          if (playerRef.current.hp <= 0) {
+                              playerRef.current.isDead = true;
+                              setGameState(GameState.GAME_OVER);
+                              onPlayerDeath();
+                          }
+                       }
+                  }
+              }
+          }
+      }
+
+      // BLOOD POOL COLLISION CHECK (Still hurts while active)
+      if ((exp as any).type === 'blood_pool' && exp.active && !playerRef.current.isDead) {
+          // Circle collision with player rect
+          const poolRadius = 24; // Increased from 16
+          // Player rect center
+          const pCx = playerRef.current.x + playerRef.current.width/2;
+          const pCy = playerRef.current.y + playerRef.current.height/2;
+          
+          const dx = pCx - exp.x;
+          const dy = pCy - exp.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          
+          if (dist < poolRadius + playerRef.current.width/2) {
+              // Hit
+              if (!godModeRef.current && (!playerRef.current.invulnerabilityTimer || playerRef.current.invulnerabilityTimer <= 0)) {
+                  playerRef.current.hp -= 1;
+                  setPlayerHp(playerRef.current.hp);
+                  playerRef.current.invulnerabilityTimer = 30; // 0.5s invulnerability
+                  if (playerRef.current.hp <= 0) {
+                      playerRef.current.isDead = true;
+                      setGameState(GameState.GAME_OVER);
+                      onPlayerDeath();
+                  }
+              }
+          }
+      }
+
       if (exp.stage <= 0) exp.active = false;
     });
     explosionsRef.current = explosionsRef.current.filter(e => e.active);
@@ -1693,6 +2464,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                      ctx.fillRect(px + 6, py + 22, 4, 4);
                      ctx.fillRect(px + 22, py + 22, 4, 4);
                 }
+            } else if (tile === TileType.WIRE) {
+                // Barbed Wire rendering
+                ctx.fillStyle = '#222';
+                ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                
+                // Draw X patterns
+                ctx.strokeStyle = COLORS.WIRE;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                // Cross 1
+                ctx.moveTo(px + 4, py + 4);
+                ctx.lineTo(px + TILE_SIZE - 4, py + TILE_SIZE - 4);
+                ctx.moveTo(px + TILE_SIZE - 4, py + 4);
+                ctx.lineTo(px + 4, py + TILE_SIZE - 4);
+                
+                // Mini barbs
+                ctx.moveTo(px, py + TILE_SIZE/2);
+                ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE/2);
+                
+                ctx.stroke();
             } else if (tile === TileType.FOG) {
                  // Fog Block Rendering with Loop Animation
                  ctx.save();
@@ -1735,6 +2526,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
         }
     }
+
 
     // Helper to draw Medusa (Sally Boss)
     const drawMedusa = (tank: Tank) => {
@@ -2035,6 +2827,143 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             return;
         }
 
+        // --- BLOODSEEKER RENDER ---
+        if (tank.id === 'BLOODSEEKER') {
+            const cx = drawX + tank.width / 2;
+            const cy = drawY + tank.height / 2;
+            
+            ctx.save();
+            ctx.translate(cx, cy);
+            
+            // Rotation based on movement direction
+            let rot = 0;
+            switch(tank.direction) {
+                case Direction.RIGHT: rot = 0; break;
+                case Direction.DOWN: rot = Math.PI/2; break;
+                case Direction.LEFT: rot = Math.PI; break;
+                case Direction.UP: rot = -Math.PI/2; break;
+            }
+            ctx.rotate(rot);
+            
+            // Intense shake if preparing bite OR if in rage mode
+            if (tank.biteState === 'PRE_BITE' || (tank.rageTimer && tank.rageTimer > 0)) {
+                // Heavier shake
+                ctx.translate((Math.random()-0.5)*4, (Math.random()-0.5)*4);
+            }
+            
+            // Body (Aggressive Red Shape)
+            ctx.fillStyle = '#8B0000'; // Dark Red
+            // Flash white if hit OR if in Rage
+            const hitFlash = tank.wireHitTimer && tank.wireHitTimer > 0;
+            const rageFlash = tank.rageTimer && tank.rageTimer > 0;
+            
+            if (hitFlash && Math.floor(Date.now() / 50) % 2 === 0) {
+                ctx.fillStyle = '#FFFFFF';
+            } else if (rageFlash) {
+                // Pulse bright red in rage
+                const pulse = Math.floor(Date.now() / 100) % 2 === 0;
+                ctx.fillStyle = pulse ? '#FF0000' : '#8B0000';
+            }
+
+            // Main body
+            ctx.fillRect(-tank.width/2, -tank.height/2 + 4, tank.width, tank.height - 8);
+            
+            // Treads
+            ctx.fillStyle = '#220000'; // Almost black red
+            ctx.fillRect(-tank.width/2, -tank.height/2, tank.width, 6); // Top tread
+            ctx.fillRect(-tank.width/2, tank.height/2 - 6, tank.width, 6); // Bottom tread
+            
+            // Spikes (Melee Weapon) on the front (Right side in local space)
+            // THESE ARE THE "GREY FANGS/TEETH"
+            ctx.fillStyle = '#C0C0C0'; // Silver
+            ctx.beginPath();
+            // Spike 1
+            ctx.moveTo(tank.width/2, -10);
+            ctx.lineTo(tank.width/2 + 15, -5);
+            ctx.lineTo(tank.width/2, 0);
+            // Spike 2
+            ctx.lineTo(tank.width/2 + 20, 0); // Big center spike
+            ctx.lineTo(tank.width/2, 5);
+            // Spike 3
+            ctx.lineTo(tank.width/2 + 15, 10);
+            ctx.lineTo(tank.width/2, 10);
+            ctx.fill();
+            
+            // Turret (Non-functional but visual)
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.arc(-5, 0, 12, 0, Math.PI*2);
+            ctx.fill();
+            
+            // Blood Splatter Decor on Tank
+            ctx.fillStyle = '#500000';
+            ctx.beginPath();
+            ctx.arc(5, 5, 4, 0, Math.PI*2);
+            ctx.arc(-8, -4, 3, 0, Math.PI*2);
+            ctx.fill();
+
+            // MOUTH ANIMATION (JAW)
+            // Positioned at front (x > tank.width/2), larger than boss
+            if (tank.biteState === 'PRE_BITE' || tank.biteState === 'BITING') {
+                const jawSize = tank.width * 1.2; 
+                const jawOffset = tank.width/2; 
+                const jawOpenAmount = tank.biteState === 'PRE_BITE' ? 20 + Math.sin(Date.now()/50)*5 : 25; // Wiggle or Wide open
+
+                ctx.save();
+                ctx.translate(jawOffset, 0); // Move to front
+
+                // Draw Upper Jaw
+                ctx.fillStyle = '#111'; // Inner Mouth
+                ctx.strokeStyle = '#8B0000'; // Flesh Rim
+                ctx.lineWidth = 2;
+                
+                ctx.save();
+                ctx.rotate(-Math.PI/8); // Tilt up slightly
+                ctx.translate(0, -jawOpenAmount/2);
+                
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(jawSize, -10); // Long snout
+                ctx.lineTo(jawSize - 5, 5);
+                ctx.lineTo(0, 5);
+                ctx.fill(); ctx.stroke();
+                
+                // Upper Teeth
+                ctx.fillStyle = '#EEE';
+                for(let t=0; t<5; t++) {
+                    const tx = 10 + t * 8;
+                    ctx.beginPath(); ctx.moveTo(tx, 5); ctx.lineTo(tx+3, 15); ctx.lineTo(tx+6, 5); ctx.fill();
+                }
+                ctx.restore();
+
+                // Draw Lower Jaw
+                ctx.save();
+                ctx.rotate(Math.PI/8); // Tilt down slightly
+                ctx.translate(0, jawOpenAmount/2);
+                
+                ctx.fillStyle = '#111'; 
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(jawSize, 10); 
+                ctx.lineTo(jawSize - 5, -5);
+                ctx.lineTo(0, -5);
+                ctx.fill(); ctx.stroke();
+
+                // Lower Teeth
+                ctx.fillStyle = '#EEE';
+                for(let t=0; t<5; t++) {
+                    const tx = 12 + t * 8;
+                    ctx.beginPath(); ctx.moveTo(tx, -5); ctx.lineTo(tx+3, -15); ctx.lineTo(tx+6, -5); ctx.fill();
+                }
+                ctx.restore();
+
+                ctx.restore();
+            }
+
+            ctx.restore();
+            return;
+        }
+
         // Handle Pulsation (Intro Idle)
         let scale = 1;
 
@@ -2096,6 +3025,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         if (shouldDraw) {
             drawTank(playerRef.current, COLORS.PLAYER);
+            
+            // Draw God Mode Text if active
+            if (godModeRef.current) {
+                ctx.fillStyle = '#FFD700'; // Gold
+                ctx.font = "10px 'Press Start 2P'";
+                ctx.textAlign = 'center';
+                ctx.fillText("GOD", playerRef.current.x + TANK_SIZE/2, playerRef.current.y - 8);
+            }
         }
     }
 
@@ -2106,6 +3043,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             const mainColor = isEnraged ? '#FF4500' : COLORS.BOSS; // Brighter red/orange when enraged
             const detailColor = isEnraged ? '#FFFF00' : COLORS.BOSS_DETAIL;
             drawTank(e, mainColor, detailColor);
+            
+            // --- BLOODSEEKER TENTACLES RENDER ---
+            if (e.id === 'BLOODSEEKER' && e.tentacles) {
+                const cx = e.x + e.width/2;
+                const cy = e.y + e.height/2;
+                
+                // Draw behind boss (but function order is tricky, so we draw on top here for visibility or modify layering)
+                // Let's draw them here.
+                ctx.save();
+                ctx.strokeStyle = '#500000'; // Dark blood red
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                
+                e.tentacles.forEach(t => {
+                    const tx = cx + Math.cos(t.angle + Math.sin(t.wigglePhase)*0.2) * t.length;
+                    const ty = cy + Math.sin(t.angle + Math.sin(t.wigglePhase)*0.2) * t.length;
+                    
+                    // Bezier curve for organic look
+                    const midX = (cx + tx) / 2 + Math.cos(t.wigglePhase * 1.5) * 10;
+                    const midY = (cy + ty) / 2 + Math.sin(t.wigglePhase * 1.5) * 10;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.quadraticCurveTo(midX, midY, tx, ty);
+                    ctx.stroke();
+                    
+                    // Tip
+                    ctx.fillStyle = '#8B0000';
+                    ctx.beginPath();
+                    ctx.arc(tx, ty, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                
+                ctx.restore();
+            }
+
         } else {
             drawTank(e, COLORS.ENEMY);
         }
@@ -2195,6 +3168,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.beginPath();
             ctx.arc(exp.x, exp.y, Math.max(0, size), 0, Math.PI * 2);
             ctx.fill();
+        } else if ((exp as any).type === 'saliva') {
+            // New Saliva Particle
+            ctx.fillStyle = `rgba(200, 200, 200, ${exp.stage / 15})`;
+            ctx.beginPath();
+            ctx.arc(exp.x, exp.y, 2, 0, Math.PI * 2);
+            ctx.fill();
         } else if ((exp as any).type === 'boss_aura') {
             // Boss Aura Particles
             const alpha = exp.stage / 30;
@@ -2207,6 +3186,58 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.strokeStyle = `rgba(200, 0, 0, ${alpha})`;
             ctx.lineWidth = 1;
             ctx.stroke();
+        } else if ((exp as any).type === 'blood_pool') {
+            // Blood Pool - Pulsating red circle
+            const lifeRatio = exp.stage / BLOOD_POOL_DURATION; // 1.0 -> 0.0
+            const alpha = lifeRatio < 0.2 ? lifeRatio * 5 : 0.8; // Fade out at end
+            const pulse = 1 + Math.sin(Date.now() / 200) * 0.1;
+            
+            // Bigger pools as requested
+            const sizeMult = 1.5;
+
+            ctx.fillStyle = `rgba(139, 0, 0, ${alpha})`; // Dark Red
+            ctx.beginPath();
+            ctx.ellipse(exp.x, exp.y, 16 * pulse * sizeMult, 12 * pulse * sizeMult, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Inner brighter pool
+            ctx.fillStyle = `rgba(200, 0, 0, ${alpha})`;
+            ctx.beginPath();
+            ctx.ellipse(exp.x, exp.y, 10 * pulse * sizeMult, 7 * pulse * sizeMult, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+        } else if ((exp as any).type === 'big_blood_pool') {
+            // BIG Blood Pool (Phase 2 Ultimate)
+            const lifeRatio = exp.stage / BLOODSEEKER_BIG_POOL_DURATION; 
+            const alpha = lifeRatio < 0.1 ? lifeRatio * 8 : 0.6; // Fade out at end, base opacity 0.6
+            const pulse = 1 + Math.sin(Date.now() / 300) * 0.05;
+            
+            const radius = BLOODSEEKER_BIG_POOL_RADIUS * pulse;
+
+            // Dark Maroon Outer
+            ctx.fillStyle = `rgba(60, 0, 0, ${alpha})`; 
+            ctx.beginPath();
+            ctx.arc(exp.x, exp.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Inner swirling
+            ctx.fillStyle = `rgba(100, 0, 0, ${alpha * 0.8})`;
+            ctx.beginPath();
+            ctx.arc(exp.x, exp.y, radius * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Bubbles
+            if (Math.random() > 0.5) {
+                 const angle = Math.random() * Math.PI * 2;
+                 const dist = Math.random() * radius * 0.8;
+                 const bx = exp.x + Math.cos(angle) * dist;
+                 const by = exp.y + Math.sin(angle) * dist;
+                 ctx.fillStyle = `rgba(200, 50, 50, ${alpha})`;
+                 ctx.beginPath();
+                 ctx.arc(bx, by, Math.random() * 8, 0, Math.PI * 2);
+                 ctx.fill();
+            }
+
         } else if ((exp as any).type === 'fire') {
             // Fire Particles (Sally)
             const alpha = exp.stage / 30;
@@ -2319,6 +3350,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 default:
                     fillColor = '#8B0000';
             }
+        } else if (boss.id === 'BLOODSEEKER') {
+             const hpRatio = boss.hp / boss.maxHp;
+             // Pulse faster when low HP
+             const pulseSpeed = 200 + hpRatio * 800;
+             const isRed = Math.floor(time / pulseSpeed) % 2 === 0;
+             fillColor = isRed ? '#8B0000' : '#FF0000';
         } else {
              // Juggernaut
              const isEnraged = boss.hp <= boss.maxHp / 2;
@@ -2348,7 +3385,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = '#FFFFFF';
         ctx.font = 'bold 16px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(boss.id === 'SALLY' ? 'MEDUSA' : 'JUGGERNAUT', CANVAS_WIDTH / 2, barY - 10);
+        let bossName = 'JUGGERNAUT';
+        if (boss.id === 'SALLY') bossName = 'MEDUSA';
+        else if (boss.id === 'BLOODSEEKER') bossName = 'BLOODSEEKER';
+        
+        ctx.fillText(bossName, CANVAS_WIDTH / 2, barY - 10);
     }
   }, [gameState]);
 
